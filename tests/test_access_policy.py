@@ -1,25 +1,29 @@
 """Version 0.4: individual files, folder/file mixtures and deny-wins rules."""
+
 from __future__ import annotations
 
-from dataclasses import replace
 from urllib.parse import unquote
 from xml.sax.saxutils import escape
 
 import httpx
 import pytest
 
-from levuvo_nextcloud_mcp.errors import ConfigurationError
+from levuvo_nextcloud_mcp.errors import ConfigurationError, DocumentError
+from levuvo_nextcloud_mcp.errors import NextcloudError as WebDAVError
 from levuvo_nextcloud_mcp.policy import normalize_path as validate_path
 from levuvo_nextcloud_mcp.policy import parse_rule
 from levuvo_nextcloud_mcp.settings import Settings
-from levuvo_nextcloud_mcp.errors import NextcloudError as WebDAVError
 from levuvo_nextcloud_mcp.webdav import NextcloudWebDAV
 
 BASE = "/remote.php/dav/files/agent.levuvo"
 
 FOLDERS = {
-    "05_Projekte", "05_Projekte/Offen", "05_Projekte/Vertraulich",
-    "05_Projekte/Vertraulich/Intern", "06_Marketing", "07_Ablage",
+    "05_Projekte",
+    "05_Projekte/Offen",
+    "05_Projekte/Vertraulich",
+    "05_Projekte/Vertraulich/Intern",
+    "06_Marketing",
+    "07_Ablage",
 }
 FILES = {
     "05_Projekte/Offen/Plan.md": b"# Freigegeben\nHier ist ein Plan.",
@@ -32,8 +36,11 @@ FILES = {
 
 def cfg(*allowed: str, denied: tuple[str, ...] = ()) -> Settings:
     return Settings(
-        base_url="https://storage.levuvo.com", username="agent.levuvo",
-        app_password="DUMMY_TEST_SECRET", allowed_paths=allowed, denied_paths=denied,
+        base_url="https://storage.levuvo.com",
+        username="agent.levuvo",
+        app_password="DUMMY_TEST_SECRET",
+        allowed_paths=allowed,
+        denied_paths=denied,
     )
 
 
@@ -69,6 +76,7 @@ def make_handler(log: list[tuple[str, str]]):
         if request.headers["Depth"] == "1" and relative in FOLDERS:
             nodes += [p for p in FOLDERS | FILES.keys() if p.rsplit("/", 1)[0] == relative]
         return httpx.Response(207, content=xml_response(nodes))
+
     return handler
 
 
@@ -77,8 +85,11 @@ def test_policy_multiple_allowed_paths_and_denied_subtree() -> None:
     assert s.require_allowed("05_Projekte/Offen/Plan.md") == "05_Projekte/Offen/Plan.md"
     assert s.require_allowed("06_Marketing/CI.pdf") == "06_Marketing/CI.pdf"
     for path in (
-        "05_Projekte/Vertraulich", "05_Projekte/Vertraulich/Kundenvertrag.pdf",
-        "05_Projekte/Vertraulich/Intern/Kosten.xlsx", "06_Marketing", "06_Marketing2/CI.pdf",
+        "05_Projekte/Vertraulich",
+        "05_Projekte/Vertraulich/Kundenvertrag.pdf",
+        "05_Projekte/Vertraulich/Intern/Kosten.xlsx",
+        "06_Marketing",
+        "06_Marketing2/CI.pdf",
     ):
         with pytest.raises(PermissionError):
             s.require_allowed(path)
@@ -116,10 +127,13 @@ def test_reject_duplicate_and_unset_allowed_paths() -> None:
 @pytest.mark.asyncio
 async def test_virtual_listing_file_and_folder_are_reported_correctly() -> None:
     calls = []
-    async with NextcloudWebDAV(cfg("05_Projekte", "06_Marketing/CI.pdf"), transport=httpx.MockTransport(make_handler(calls))) as dav:
+    async with NextcloudWebDAV(
+        cfg("05_Projekte", "06_Marketing/CI.pdf"), transport=httpx.MockTransport(make_handler(calls))
+    ) as dav:
         listing = await dav.list_files("")
         assert [(x["path"], x["is_dir"]) for x in listing["items"]] == [
-            ("05_Projekte", True), ("06_Marketing/CI.pdf", False),
+            ("05_Projekte", True),
+            ("06_Marketing/CI.pdf", False),
         ]
         with pytest.raises(ValueError, match="Datei"):
             await dav.list_files("06_Marketing/CI.pdf")
@@ -162,7 +176,7 @@ async def test_single_file_path_is_searchable_and_readable() -> None:
         with pytest.raises(PermissionError):
             await dav.read_file("06_Marketing/CI.pdf/foo")
         # PDF parser should reject fake bytes; even so policy/GET are enforced.
-        with pytest.raises(Exception):
+        with pytest.raises(DocumentError, match="PDF"):
             await dav.read_file("06_Marketing/CI.pdf")
     assert not any(path.endswith("/foo") for _, path in calls)
 
@@ -170,7 +184,9 @@ async def test_single_file_path_is_searchable_and_readable() -> None:
 @pytest.mark.asyncio
 async def test_untyped_file_path_is_detected_from_webdav_not_extension() -> None:
     calls = []
-    async with NextcloudWebDAV(cfg("07_Ablage/DateiOhneEndung"), transport=httpx.MockTransport(make_handler(calls))) as dav:
+    async with NextcloudWebDAV(
+        cfg("07_Ablage/DateiOhneEndung"), transport=httpx.MockTransport(make_handler(calls))
+    ) as dav:
         results = await dav.list_files()
         assert results["items"][0]["is_dir"] is False
         assert (await dav.search_files("ohne"))["results"][0]["name"] == "DateiOhneEndung"
@@ -190,7 +206,9 @@ async def test_explicit_type_mismatch_is_error() -> None:
 @pytest.mark.asyncio
 async def test_nested_file_path_under_directory_has_no_duplicates_in_search() -> None:
     calls = []
-    async with NextcloudWebDAV(cfg("05_Projekte", "file:05_Projekte/Offen/Plan.md"), transport=httpx.MockTransport(make_handler(calls))) as dav:
+    async with NextcloudWebDAV(
+        cfg("05_Projekte", "file:05_Projekte/Offen/Plan.md"), transport=httpx.MockTransport(make_handler(calls))
+    ) as dav:
         result = await dav.search_files("Plan", max_depth=3)
         assert [x["path"] for x in result["results"]] == ["05_Projekte/Offen/Plan.md"]
 
@@ -199,9 +217,7 @@ def test_environment_uses_allowed_paths_and_denied_paths(monkeypatch: pytest.Mon
     monkeypatch.setenv("NEXTCLOUD_URL", "https://storage.levuvo.com")
     monkeypatch.setenv("NEXTCLOUD_USERNAME", "agent.levuvo")
     monkeypatch.setenv("NEXTCLOUD_APP_PASSWORD", "DUMMY_TEST_SECRET")
-    monkeypatch.setenv(
-        "NEXTCLOUD_ALLOWED_PATHS", "dir:01_Unternehmen,file:06_Marketing/CI.pdf"
-    )
+    monkeypatch.setenv("NEXTCLOUD_ALLOWED_PATHS", "dir:01_Unternehmen,file:06_Marketing/CI.pdf")
     monkeypatch.setenv("NEXTCLOUD_DENIED_PATHS", "01_Unternehmen/Privat")
     settings = Settings.from_env()
     assert settings.allowed_paths == ("dir:01_Unternehmen", "file:06_Marketing/CI.pdf")

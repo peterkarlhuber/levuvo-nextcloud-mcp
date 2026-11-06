@@ -108,13 +108,13 @@ def create_mcp(
     async def list_files(
         path: OptionalPathArg = "",
         limit: Annotated[int, Field(ge=1, le=250, description="Maximale Anzahl Einträge.")] = 100,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Erlaubte Nextcloud-Dateien/Ordner oder die direkten Inhalte eines erlaubten Ordners auflisten. Leerer Pfad = freigegebene Einträge."""
         return await holder.get().list_files(path, limit=limit)
 
     @mcp.tool(annotations=ToolAnnotations(title="Datei-Metadaten", **READ_ONLY_TOOL))
     @_expected_errors
-    async def get_file_info(path: PathArg) -> dict:
+    async def get_file_info(path: PathArg) -> dict[str, Any]:
         """Metadaten (Typ, Größe, Änderungsdatum, Nextcloud-Rechte) einer erlaubten Datei bzw. eines Ordners abrufen, ohne Inhalt."""
         return (await holder.get().info(path)).to_dict()
 
@@ -124,7 +124,7 @@ def create_mcp(
         query: Annotated[str, Field(min_length=1, max_length=120, description="Teil des Datei- oder Ordnernamens.")],
         max_depth: Annotated[int, Field(ge=0, le=6, description="Maximale Unterordner-Tiefe.")] = 3,
         max_results: Annotated[int, Field(ge=1, le=100, description="Maximale Trefferzahl.")] = 25,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Datei- und Ordnernamen in den freigegebenen Bereichen suchen (keine Volltextsuche)."""
         return await holder.get().search_files(query, max_depth=max_depth, max_results=max_results)
 
@@ -133,7 +133,7 @@ def create_mcp(
     async def read_file(
         path: PathArg,
         max_chars: Annotated[int, Field(ge=100, le=30000, description="Maximale Zeichenzahl der Ausgabe.")] = 16000,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Eine erlaubte Datei als Text lesen (TXT/MD/CSV/JSON u. a., PDF, DOCX, XLSX; keine OCR), begrenzt auf max_chars."""
         return await holder.get().read_file(path, max_chars=max_chars)
 

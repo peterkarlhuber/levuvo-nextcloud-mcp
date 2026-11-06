@@ -1,7 +1,30 @@
-# DNS A/AAAA for mcp.levuvo.com must point to the proxy host.
-# This machine must accept HTTPS on 443 and reach loopback :8765.
-# Do not point the public DNS record to Hetzner Storage Share.
+# Beispiel für Caddy 2 auf einem eigenen Linux-Server (nicht auf einem echten Server getestet).
+#
+# mcp.levuvo.com ist eine Beispieldomain. Dieses Projekt richtet KEIN DNS ein:
+# Ein A/AAAA-Eintrag muss auf diesen Server zeigen, nicht auf die Storage Share.
+# Ports 80/443 müssen für die automatischen Zertifikate erreichbar sein.
+# Port 8765 bleibt geschlossen; der MCP-Dienst lauscht nur auf 127.0.0.1.
+
 mcp.levuvo.com {
-    encode zstd gzip
-    reverse_proxy 127.0.0.1:8765
+	# MCP-Anfragen sind klein; der Dienst selbst begrenzt auf 128 KiB.
+	request_body {
+		max_size 256KB
+	}
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+
+	# Host- und Authorization-Header werden unverändert weitergereicht
+	# (der Dienst prüft den Host gegen MCP_PUBLIC_URL).
+	reverse_proxy 127.0.0.1:8765
+
+	# Access-Log nur bei Bedarf aktivieren. Caddy schwärzt Authorization-Header
+	# standardmäßig; die globale Option log_credentials NICHT setzen.
+
+	# Rate-Limiting ist in Standard-Caddy nicht enthalten; optional über ein
+	# Plugin (z. B. caddy-ratelimit) oder eine Firewall ergänzen.
 }

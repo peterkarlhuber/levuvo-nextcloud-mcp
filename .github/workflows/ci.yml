@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main, "release/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Lockfile is up to date
+        run: uv lock --check
+      - name: Ruff lint
+        run: uv run --frozen --extra dev ruff check .
+      - name: Ruff format
+        run: uv run --frozen --extra dev ruff format --check .
+
+  test:
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.11", "3.12", "3.13"]
+        include:
+          - os: macos-latest
+            python: "3.12"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Tests (offline, no Nextcloud credentials)
+        run: uv run --frozen --extra dev pytest --cov --cov-report=term-missing
+
+  pip-lockfile:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install from hashed lockfile (documented pip path)
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --require-hashes -r requirements-dev.lock
+          .venv/bin/pip install --no-deps -e .
+      - name: Tests
+        run: .venv/bin/pytest -q

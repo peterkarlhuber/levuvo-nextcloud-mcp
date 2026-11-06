@@ -1,4 +1,5 @@
 """Network-free, executable checks against a mocked Nextcloud WebDAV endpoint."""
+
 from __future__ import annotations
 
 from urllib.parse import unquote, urlsplit
@@ -6,6 +7,7 @@ from urllib.parse import unquote, urlsplit
 import httpx
 import pytest
 
+from levuvo_nextcloud_mcp.errors import NextcloudError
 from levuvo_nextcloud_mcp.policy import normalize_path as validate_path
 from levuvo_nextcloud_mcp.settings import Settings
 from levuvo_nextcloud_mcp.webdav import NextcloudWebDAV
@@ -36,10 +38,13 @@ def response_xml(folder: str, entries: list[tuple[str, bool, int]], *, self_is_d
           <oc:permissions>G</oc:permissions>
           </d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>
           </d:response>"""
-    return ("<d:multistatus xmlns:d='DAV:' xmlns:oc='http://owncloud.org/ns'>"
-            + element(folder, self_is_dir, 0)
-            + "".join(element(*e) for e in entries)
-            + "</d:multistatus>").encode()
+
+    return (
+        "<d:multistatus xmlns:d='DAV:' xmlns:oc='http://owncloud.org/ns'>"
+        + element(folder, self_is_dir, 0)
+        + "".join(element(*e) for e in entries)
+        + "</d:multistatus>"
+    ).encode()
 
 
 def mock_handler(request: httpx.Request) -> httpx.Response:
@@ -50,15 +55,27 @@ def mock_handler(request: httpx.Request) -> httpx.Response:
     path = unquote(urlsplit(str(request.url)).path)
     if request.method == "PROPFIND":
         if path.rstrip("/") == BASE + "/05_Projekte":
-            return httpx.Response(207, content=response_xml("05_Projekte", [
-                ("05_Projekte/Kunde A", True, 0),
-                ("05_Projekte/Planung.md", False, 30),
-                ("05_Projekte/Ausserhalb.txt", False, 19),
-            ]))
+            return httpx.Response(
+                207,
+                content=response_xml(
+                    "05_Projekte",
+                    [
+                        ("05_Projekte/Kunde A", True, 0),
+                        ("05_Projekte/Planung.md", False, 30),
+                        ("05_Projekte/Ausserhalb.txt", False, 19),
+                    ],
+                ),
+            )
         if path.rstrip("/") == BASE + "/05_Projekte/Kunde A":
-            return httpx.Response(207, content=response_xml("05_Projekte/Kunde A", [
-                ("05_Projekte/Kunde A/Projektplan.txt", False, 21),
-            ]))
+            return httpx.Response(
+                207,
+                content=response_xml(
+                    "05_Projekte/Kunde A",
+                    [
+                        ("05_Projekte/Kunde A/Projektplan.txt", False, 21),
+                    ],
+                ),
+            )
         if path.rstrip("/") == BASE + "/05_Projekte/Planung.md":
             return httpx.Response(207, content=response_xml("05_Projekte/Planung.md", [], self_is_dir=False))
         if path.rstrip("/") == BASE + "/01_Unternehmen/Strategie":
@@ -69,11 +86,19 @@ def mock_handler(request: httpx.Request) -> httpx.Response:
     return httpx.Response(404)
 
 
-@pytest.mark.parametrize("bad", [
-    "../05_Projekte", "/05_Projekte", "05_Projekte/../03_Vertraege",
-    "05_Projekte//Hallo", "05_Projekte\\Hallo", "05_Projekte/./Hallo",
-    "05_Projekte\nFehler", "",
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "../05_Projekte",
+        "/05_Projekte",
+        "05_Projekte/../03_Vertraege",
+        "05_Projekte//Hallo",
+        "05_Projekte\\Hallo",
+        "05_Projekte/./Hallo",
+        "05_Projekte\nFehler",
+        "",
+    ],
+)
 def test_invalid_paths(bad: str) -> None:
     with pytest.raises(ValueError):
         validate_path(bad)
@@ -144,7 +169,7 @@ async def test_redirect_is_never_followed() -> None:
         return httpx.Response(302, headers={"Location": "https://attacker.example/collect"})
 
     async with NextcloudWebDAV(config(), transport=httpx.MockTransport(redirect)) as dav:
-        with pytest.raises(Exception):
+        with pytest.raises(NextcloudError, match="Weiterleitung"):
             await dav.info("05_Projekte/Planung.md")
     assert requested == ["storage.levuvo.com"]
 
@@ -152,12 +177,16 @@ async def test_redirect_is_never_followed() -> None:
 def test_credentials_are_not_part_of_url() -> None:
     dav = NextcloudWebDAV(config(), transport=httpx.MockTransport(mock_handler))
     url = dav._url("05_Projekte/Datei mit Leerzeichen.md")
-    assert url == "https://storage.levuvo.com/remote.php/dav/files/agent.levuvo/05_Projekte/Datei%20mit%20Leerzeichen.md"
+    assert (
+        url == "https://storage.levuvo.com/remote.php/dav/files/agent.levuvo/05_Projekte/Datei%20mit%20Leerzeichen.md"
+    )
     assert "DUMMY_TEST_SECRET" not in url
 
 
 def test_nextcloud_password_placeholder_rejected() -> None:
     from dataclasses import replace
+
     from levuvo_nextcloud_mcp.errors import ConfigurationError
+
     with pytest.raises(ConfigurationError):
         replace(config(), app_password="EIGENES_NEXTCLOUD_APP_PASSWORT")

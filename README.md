@@ -1,199 +1,276 @@
-# Levuvo Nextcloud MCP v0.4
+# Levuvo Nextcloud MCP
 
-Eigener **read-only MCP-Server** für eure Hetzner Storage Share NX11 (`storage.levuvo.com`).
+Schreibgeschützter MCP-Server (Model Context Protocol) für die Hetzner Storage Share der Levuvo unter `https://storage.levuvo.com`. Er gibt einem KI-Client (z. B. Claude Code) Lesezugriff auf ausdrücklich freigegebene Dateien und Ordner – und auf nichts sonst.
 
-- **Claude Code**: lokal über `stdio`, ohne weiteren Server.
-- **Claude Web**: über `https://mcp.levuvo.com/mcp` + Authentifizierung (nach Hosting/Setup).
-- **ChatGPT**: derselbe Remote-MCP-Server ist technisch verwendbar; direkte eigene MCP-Connectoren erfordern laut aktueller OpenAI-Hilfe einen geeigneten Business- oder Enterprise/Edu-Workspace. OAuth-Integration benötigt zusätzlich einen kompatibel konfigurierten Identity Provider.
+## Kurzüberblick und Status
 
-> Status: Quellcode und Offline-Tests vorhanden. **Nicht** gegen eure echte Nextcloud oder einen echten Cloud-Connector getestet; Deployment und Authentifizierung müssen erst konfiguriert werden. Vertrauliche Daten zunächst nicht freigeben.
+- **Version:** 0.5.0 (Python 3.11+, MIT-Lizenz).
+- **Lokal (Standard):** Claude Code startet den Server über `stdio` auf dem Mac. Kein offener Port, kein Hosting.
+- **Remote (optional):** Streamable HTTP auf `127.0.0.1` hinter einem TLS-Reverse-Proxy, mit statischem Bearer-Token oder OAuth (externer Identity Provider nötig).
+- **Nur lesen:** Der Server sendet an Nextcloud ausschließlich `GET` und `PROPFIND`. Es gibt keine Werkzeuge zum Schreiben, Löschen, Verschieben oder Teilen.
 
-## Enthalten
+> **Status:** Der lokale Betrieb ist implementiert und automatisiert getestet, wurde aber noch **nicht** gegen die echte Storage Share und nicht mit der echten Claude-Code-App geprüft. Ein öffentlich erreichbarer Remote-Endpunkt ist **nicht produktionsreif**, solange die Checkliste in [SECURITY.md](SECURITY.md) nicht abgearbeitet ist und Tests mit dem realen Client nicht bestanden sind. Zu Beginn nur einen Testordner ohne vertrauliche Daten freigeben.
 
-```
-levuvo-nextcloud-mcp-v0.4/
-├── .env.example
-├── pyproject.toml
-├── src/levuvo_nextcloud_mcp/
-│   ├── __main__.py          # Einstieg
-│   ├── server.py            # MCP SDK: stdio + Remote-HTTP
-│   ├── webdav.py            # Nur GET und PROPFIND, Allowlist
-│   ├── extractors.py        # TXT/MD/CSV/JSON/PDF/DOCX/XLSX
-│   ├── settings.py          # Nextcloud-Konfiguration
-│   ├── remote_settings.py   # Remote-Betrieb und Auth-Validierung
-│   ├── static_bearer.py     # HTTP-Bearer-Token-Schutz
-│   └── jwt_tokens.py        # JWT-Zugriffstoken verifizieren
-├── deploy/
-│   ├── Caddyfile.example
-│   └── levuvo-nextcloud-mcp.service.example
-├── tests/
-└── SECURITY.md
-```
+## Werkzeuge
 
-### Exponierte MCP-Werkzeuge
+| Werkzeug | Parameter (Grenzen) | Ergebnis |
+|---|---|---|
+| `list_files` | `path` (leer = alle Freigaben), `limit` 1–250, Standard 100 | Freigegebene Einträge bzw. direkte Inhalte eines freigegebenen Ordners (`folder`, `items`, `truncated`) |
+| `get_file_info` | `path` | Metadaten ohne Inhalt: Typ, Größe, Content-Type, Änderungsdatum, ETag, Nextcloud-Rechte |
+| `search_files` | `query` 1–120 Zeichen, `max_depth` 0–6 (Standard 3), `max_results` 1–100 (Standard 25) | Treffer im **Datei- oder Ordnernamen** (keine Volltextsuche); `complete` zeigt, ob vollständig gesucht wurde |
+| `read_file` | `path`, `max_chars` 100–30000 (Standard 16000) | Text der Datei (`format`, `size_bytes`, `text`, `truncated`, bei Textdateien zusätzlich `encoding`) |
 
-| Werkzeug | Beschreibung |
-|---|---|
-| `list_files(path="", limit=100)` | Erlaubte Dateien/Ordner oder direkte Ordnerinhalte auflisten |
-| `get_file_info(path)` | Datei-Metadaten |
-| `search_files(query, max_depth=3, max_results=25)` | Dateinamensuche inkl. einzeln erlaubter Dateien, keine Volltextsuche |
-| `read_file(path, max_chars=16000)` | Datei in Text umwandeln, begrenzt (max. 30.000 Zeichen) |
+Alle vier Werkzeuge tragen die MCP-Annotationen `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true` und `openWorldHint=false` (eine fest konfigurierte Nextcloud, geschlossener Bereich). Die Annotationen beschreiben das Verhalten nur; erzwungen wird es im Code.
 
-Keinerlei MCP-Werkzeuge zum Schreiben, Löschen, Hochladen, Verschieben oder Freigeben.
+Erwartbare Fehler (Pfad nicht freigegeben, Datei zu groß, Nextcloud nicht erreichbar …) kommen als MCP-Werkzeugfehler mit deutscher Meldung zurück. Bei unerwarteten Abstürzen erhält der Client nur eine allgemeine Meldung (`Error executing tool <name>`); Details landen im Server-Log auf stderr.
 
-## Neu in v0.4: mehrere Dateien und Ordner, optionale Ausschlüsse
+**Unterstützte Formate in `read_file`:** Textformate (`.txt .md .markdown .csv .tsv .json .jsonl .yaml .yml .xml .html .htm .log .toml .ini .cfg .py .js .ts .css .sql .rst`), `.pdf`, `.docx`, `.xlsx`.
 
-Die Einstellungen werden in `.env` als **kommagetrennte Pfade** relativ zum Nextcloud-Startordner des technischen Benutzers angegeben:
+- Text: UTF-8 (mit oder ohne BOM), UTF-16 mit BOM, sonst Windows-1252 (`encoding: "cp1252"`, typisch für Excel-CSV). Binäre Inhalte werden abgelehnt.
+- PDF: höchstens 40 Seiten, keine OCR; bei gescannten PDFs folgt ein Hinweis. Verschlüsselte PDFs werden abgelehnt.
+- DOCX: Absätze und Tabellen des Haupttexts in Dokumentreihenfolge (keine Kopf-/Fußzeilen, Textfelder, Kommentare).
+- XLSX: höchstens 10 Blätter, 1000 Zeilen, 60 Spalten; nur gespeicherte Werte, Formeln werden nicht berechnet.
+- Office-Dateien werden vor dem Entpacken auf Zip-Bomben geprüft; beschädigte Dokumente ergeben eine klare Fehlermeldung.
+- Downloadlimit: `NEXTCLOUD_MAX_FILE_BYTES` (Standard 8 MB).
 
-```dotenv
-NEXTCLOUD_ALLOWED_PATHS=dir:01_Unternehmen/Strategie,file:02_Finanzen/Budget_2027.xlsx,05_Projekte/SaaS-Produkte,06_Marketing/CI.pdf
-NEXTCLOUD_DENIED_PATHS=05_Projekte/SaaS-Produkte/Intern,01_Unternehmen/Strategie/Personalplanung.docx
-```
+## Schnellstart: macOS mit Claude Code
 
-**Typdefinition für Freigaben:**
+### 1. Voraussetzungen
 
-- `dir:Pfad` – Ordner einschließlich Unterordner; ein tatsächlicher Datei-Pfad wird als Konfigurationskonflikt abgelehnt.
-- `file:Pfad` – genau diese einzelne Datei, niemals deren Unterpfade; ein tatsächlicher Ordner wird als Konfigurationskonflikt abgelehnt.
-- `Pfad` – ohne Präfix, automatische Typerkennung; WebDAV-Metadaten bestimmen, ob Datei oder Ordner. **Für vertrauliche Daten `file:`/`dir:` ausdrücklich angeben.**
-- `NEXTCLOUD_DENIED_PATHS` – optional. Exakte Datei/Ordner-Ausschlüsse; ein ausgeschlossener Ordner sperrt seine gesamte Unterstruktur. **Deny hat Vorrang, auch bei überlappenden Freigaben.**
+- **Python 3.11 oder neuer.** Das System-Python von macOS ist oft 3.9 und funktioniert nicht. Prüfen mit `python3 --version`; sonst `brew install python@3.12` oder [uv](https://docs.astral.sh/uv/) (`brew install uv`, uv lädt bei Bedarf selbst ein passendes Python).
+- Claude Code CLI (`claude`).
+- Ein eigenes technisches Nextcloud-Konto (z. B. `agent.levuvo`) mit App-Passwort und einem **schreibgeschützt** geteilten Testordner – Einrichtung siehe [SECURITY.md](SECURITY.md#nextcloud-seite-minimale-rechte).
 
-**Beispiel:** `NEXTCLOUD_ALLOWED_PATHS=dir:05_Projekte` erlaubt künftig jede neue Datei unter diesem Ordner. `NEXTCLOUD_DENIED_PATHS=05_Projekte/Vertraulich` verbietet diesen Unterbaum, nicht aber neu angelegte andere vertrauliche Dateien außerhalb der Ausschlussliste. Deshalb bevorzugen wir kleine, präzise Freigaben statt breite Freigaben mit vielen Ausnahmen.
+### 2. Installieren (reproduzierbar über Lockfiles)
 
-`list_files(path="")` liefert die freigegebenen Einträge **mit korrektem Datei-/Ordnertyp**, auch einzelne Dateien. `search_files` durchsucht Dateinamen der expliziten Dateien und Unterordner; ausgeschlossene Einträge werden weder in Listen noch Suchergebnissen angezeigt und können nicht direkt gelesen werden. `list_files(path=<Datei>)` meldet einen verständlichen Fehler (für Dateien `get_file_info`/`read_file` nutzen). Ohne gültige Freigaben startet der Server nicht.
-
-**Wichtig:** Nextcloud-Freigaben und eure MCP-Allowlist sind **zwei verschiedene Sicherheitsebenen**. Der technische Benutzer benötigt die Lese-Freigabe zusätzlich zu den MCP-Pfaden. Es werden keine zusätzlichen Zugriffsmöglichkeiten in Nextcloud erzeugt. Dateien, die zur Analyse an Claude/ChatGPT gehen, verlassen eure Nextcloud-Infrastruktur.
-
-## A. Schnellstart mit Claude Code (Mac)
-
-Voraussetzungen: macOS, Python 3.11+, Claude Code CLI, ein Nextcloud-Konto mit eigenen App-Passwort.
+Mit uv (empfohlen):
 
 ```bash
-# ZIP entpacken; Terminal im entpackten Projektordner öffnen
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e '.[dev]'
+cd levuvo-nextcloud-mcp
+uv sync --extra dev          # nutzt uv.lock, legt .venv an
+```
+
+Alternativ mit pip und Hash-geprüfter Lockdatei:
+
+```bash
+cd levuvo-nextcloud-mcp
+python3.12 -m venv .venv
+.venv/bin/pip install --require-hashes -r requirements-dev.lock
+.venv/bin/pip install --no-deps -e .
+```
+
+`requirements.lock` enthält nur die Laufzeitabhängigkeiten (ohne Test-Werkzeuge).
+
+### 3. Konfigurieren
+
+```bash
 cp .env.example .env
 chmod 600 .env
 ```
 
-In `.env` nur diese Felder passend setzen:
+In `.env` mindestens setzen:
 
-- `NEXTCLOUD_URL=https://storage.levuvo.com`
-- `NEXTCLOUD_USERNAME=agent.levuvo` (exakter Nextcloud-Loginname)
-- `NEXTCLOUD_APP_PASSWORD=...` (eigenes App-Passwort, kein normales Login-Passwort)
-- `NEXTCLOUD_ALLOWED_PATHS=dir:00_Agent_Test` (zunächst **ein** mit Leserecht geteilter Testordner)
+```dotenv
+NEXTCLOUD_URL=https://storage.levuvo.com
+NEXTCLOUD_USERNAME=agent.levuvo
+NEXTCLOUD_APP_PASSWORD=<App-Passwort aus Nextcloud>
+NEXTCLOUD_ALLOWED_PATHS=dir:00_Agent_Test
+```
 
-**Sicherer Freigabeablauf:** Account `agent.levuvo` ohne Adminrechte erstellen; einen Testordner **von einem anderen Benutzer aus** mit ausschließlich Lesezugriff an `agent.levuvo` teilen. Keine vertraulichen Daten hineinlegen. Ein technischer Nextcloud-Benutzer hat einen eigenen beschreibbaren Bereich: Der MCP-Code verbietet Schreibwerkzeuge und über die Allowlist wird nur die Testfreigabe sichtbar. Keine allgemeinen Nextcloud-Wurzelverzeichnisse freigeben.
-
-Danach im Projektordner:
+Prüfen:
 
 ```bash
-claude mcp add --scope user --transport stdio levuvo-nextcloud -- "$(pwd)/.venv/bin/python" -m levuvo_nextcloud_mcp
+.venv/bin/levuvo-nextcloud-mcp --check-config      # offline, zeigt keine Geheimnisse
+.venv/bin/levuvo-nextcloud-mcp --check-nextcloud   # liest Metadaten der Freigaben aus Nextcloud
+```
+
+### 4. In Claude Code eintragen
+
+Im Projektordner:
+
+```bash
+claude mcp add --scope user --transport stdio levuvo-nextcloud \
+  --env LEVUVO_MCP_ENV_FILE="$(pwd)/.env" \
+  -- "$(pwd)/.venv/bin/levuvo-nextcloud-mcp"
 claude mcp list
 ```
 
-Im Claude-Code-Chat: `Liste die freigegebenen Ordner mit levuvo-nextcloud auf.`
+Ein älterer Eintrag (z. B. aus v0.4) muss vorher entfernt werden:
 
-**Hinweis:** Für v0.4 nur die beiden Einstellungen `NEXTCLOUD_ALLOWED_PATHS` und `NEXTCLOUD_DENIED_PATHS` verwenden. Frühere `.env`-Dateien müssen entsprechend angepasst werden; alte Variablennamen werden nicht unterstützt. Falls `levuvo-nextcloud` in Claude Code schon eingetragen ist, den alten Eintrag erst mit `claude mcp remove levuvo-nextcloud --scope user` entfernen und anschließend das obige `add` ausführen.
+```bash
+claude mcp remove levuvo-nextcloud --scope user
+```
 
-## B. Remote-HTTP lokal testen
+Danach in Claude Code z. B.: „Liste mit levuvo-nextcloud die freigegebenen Ordner auf.“
 
-Der Server bindet **immer `127.0.0.1`**, also nur Loopback. Die `MCP_PUBLIC_URL` ist der künftige öffentliche Name, nicht die lokale Bind-Adresse.
+`LEVUVO_MCP_ENV_FILE` ist nötig, weil Claude Code den Server nicht zwingend im Projektordner startet. Ohne die Variable sucht der Server `.env` nur neben `pyproject.toml` einer Quellcode-Installation.
 
-`.env` zusätzlich befüllen:
+## Berechtigungen
+
+Zugriff steuern ausschließlich zwei Variablen mit identischer Syntax:
+
+- `NEXTCLOUD_ALLOWED_PATHS` – Freigaben (Pflicht, mindestens ein Eintrag).
+- `NEXTCLOUD_DENIED_PATHS` – Ausnahmen innerhalb der Freigaben (optional).
+
+Andere oder ältere Variablen (z. B. `NEXTCLOUD_ALLOWED_ROOTS`) kennt v0.5 nicht; sie werden ignoriert, und der Server startet dann mit „NEXTCLOUD_ALLOWED_PATHS ist leer“ nicht.
+
+### Syntax
+
+Einträge werden mit Komma getrennt. Pfade sind relativ zum Dateibereich des technischen Kontos (so, wie `agent.levuvo` die Dateien in Nextcloud sieht), mit `/` getrennt.
+
+| Form | Bedeutung |
+|---|---|
+| `dir:Pfad` | Ordner mit allen Unterordnern. Ist der Pfad in Nextcloud eine Datei, gibt es zur Laufzeit einen Fehler. |
+| `file:Pfad` | Genau diese eine Datei. Ist der Pfad ein Ordner, gibt es zur Laufzeit einen Fehler. |
+| `Pfad` | Typ wird über Nextcloud erkannt. Für vertrauliche Bereiche besser `dir:`/`file:` angeben. |
 
 ```dotenv
-MCP_AUTH_MODE=static
-MCP_PUBLIC_URL=https://mcp.levuvo.com/mcp
-MCP_HTTP_PORT=8765
-MCP_STATIC_TOKEN=DEIN_ZUFAELLIGER_WERT
+NEXTCLOUD_ALLOWED_PATHS=dir:01_Unternehmen/Strategie,file:02_Finanzen/Budget_2027.xlsx,dir:05_Projekte/SaaS-Produkte
+NEXTCLOUD_DENIED_PATHS=dir:05_Projekte/SaaS-Produkte/Intern,file:01_Unternehmen/Strategie/Personalplanung.docx
 ```
 
-Token erzeugen und in `.env` einfügen:
+### Regeln
+
+- **Pfadform:** kein führendes `/`, kein Backslash, keine `.`/`..`-Abschnitte, keine Steuer- oder unsichtbaren Formatzeichen. Ein abschließendes `/` wird entfernt. Pfade werden Unicode-NFC-normalisiert.
+- **Keine URL-Kodierung:** `%20` und ähnliche Sequenzen werden abgelehnt. Pfade unkodiert angeben (`Projekt Alpha`, nicht `Projekt%20Alpha`).
+- **Präfixe:** nur `dir:` und `file:`, klein geschrieben. `DIR:`, `folder:` usw. sind ein Startfehler. Beginnt ein Ordnername selbst mit `Wort:` (z. B. `Projekt:Alpha`), immer mit Präfix angeben: `dir:Projekt:Alpha`.
+- **Freigaben sind exakt:** Verglichen wird nach NFC-Normalisierung, Groß-/Kleinschreibung zählt. Die Normalisierung kann den Zugriff also nie erweitern.
+- **Ausschlüsse sind vorsichtig:** Sie greifen auch bei anderer Schreibweise (Groß-/Kleinschreibung, Unicode-Varianten, Punkte/Leerzeichen am Ende eines Abschnitts) und sperren **immer den ganzen Teilbaum**, unabhängig von `dir:`/`file:`. Ausschluss hat immer Vorrang. Ein Präfix bei Ausschlüssen wird geprüft, sobald der Eintrag in einer Ordnerliste auftaucht; widerspricht er dem echten Typ, gibt es einen Fehler.
+- **Gleiche Antwort:** Ein ausgeschlossener und ein nie freigegebener Pfad liefern dieselbe Meldung („Der Pfad ist nicht für den MCP-Agenten freigegeben.“).
+- **Startfehler** (Server startet nicht, Exit-Code 2):
+  - leere Freigabeliste,
+  - doppelte Einträge, auch in anderer Schreibweise (`dir:Test` und `test`),
+  - Ausschluss, der unter keiner Freigabe liegt (wirkungslos, meist Tippfehler),
+  - Freigabe, die von einem Ausschluss vollständig gesperrt wird,
+  - Einträge unterhalb einer `file:`-Freigabe,
+  - unbekannte Präfixe, ungültige Pfade.
+
+### Stolperfallen
+
+- Breite Ordnerfreigaben geben auch **künftig angelegte** Dateien frei. Kleine, gezielte Freigaben sind sicherer als breite Freigaben mit vielen Ausnahmen.
+- Nextcloud-Freigabe und MCP-Freigabe sind zwei getrennte Ebenen: Der Pfad muss für `agent.levuvo` in Nextcloud lesbar **und** hier freigegeben sein.
+- Kommas in Datei- oder Ordnernamen lassen sich nicht angeben (Komma ist das Trennzeichen).
+- Geteilte Ordner erscheinen beim Empfänger normalerweise in dessen Wurzelverzeichnis, je nach Nextcloud-Einstellung auch in einem Unterordner. Maßgeblich ist der Pfad, den `agent.levuvo` in der Weboberfläche sieht.
+
+## Konfigurationsreferenz
+
+Die Werte kommen aus echten Umgebungsvariablen oder einer `.env`-Datei. Echte Umgebungsvariablen haben Vorrang vor der Datei. Suchreihenfolge der Datei: `LEVUVO_MCP_ENV_FILE` (muss existieren, falls gesetzt) → `.env` neben `pyproject.toml` (nur in einer Quellcode-Installation) → keine Datei. Ist die Datei für Gruppe oder andere lesbar, warnt der Server (Empfehlung `chmod 600`).
+
+| Variable | Pflicht | Standard | Bedeutung |
+|---|---|---|---|
+| `NEXTCLOUD_URL` | ja | – | HTTPS-Adresse ohne Pfad und ohne Zugangsdaten, z. B. `https://storage.levuvo.com` |
+| `NEXTCLOUD_USERNAME` | ja | – | Loginname des technischen Kontos |
+| `NEXTCLOUD_APP_PASSWORD` | ja | – | App-Passwort (nicht das Login-Passwort); Platzhalter werden abgelehnt |
+| `NEXTCLOUD_USER_ID` | nein | = Loginname | WebDAV-Benutzer-ID, falls sie vom Loginnamen abweicht (z. B. Login per E-Mail-Adresse) |
+| `NEXTCLOUD_ALLOWED_PATHS` | ja | – | Freigaben, siehe [Berechtigungen](#berechtigungen) |
+| `NEXTCLOUD_DENIED_PATHS` | nein | leer | Ausnahmen |
+| `NEXTCLOUD_MAX_FILE_BYTES` | nein | `8000000` | Downloadlimit für `read_file`, 1–30000000 |
+| `NEXTCLOUD_TIMEOUT_SECONDS` | nein | `20` | Zeitlimit für Nextcloud-Anfragen, 1–120 |
+| `LEVUVO_MCP_ENV_FILE` | nein | – | Expliziter Pfad zur `.env` |
+| `MCP_PUBLIC_URL` | nur HTTP | `https://mcp.levuvo.com/mcp` | Öffentliche HTTPS-Adresse, muss auf `/mcp` enden, Port nur 443 |
+| `MCP_HTTP_PORT` | nur HTTP | `8765` | Lokaler Port (1024–65535), immer nur `127.0.0.1` |
+| `MCP_AUTH_MODE` | nur HTTP | `static` | `static` oder `oauth` |
+| `MCP_STATIC_TOKEN` | bei `static` | – | Zufälliges Token, 32–512 Zeichen, ohne Leerzeichen |
+| `MCP_OAUTH_ISSUER` | bei `oauth` | – | Issuer des Identity Providers (HTTPS, exakt wie im Token) |
+| `MCP_OAUTH_JWKS_URL` | bei `oauth` | – | JWKS-Adresse des Identity Providers (HTTPS) |
+| `MCP_OAUTH_AUDIENCE` | bei `oauth` | – | Erwarteter `aud`-Wert des Access Tokens |
+| `MCP_OAUTH_SCOPE` | bei `oauth` | `files:read` | Erforderlicher Scope |
+
+Die `MCP_*`-Variablen werden nur mit `--transport http` gelesen und geprüft.
+
+## Prüfbefehle
+
+Aufruf als `levuvo-nextcloud-mcp` oder `python -m levuvo_nextcloud_mcp`:
+
+| Befehl | Wirkung |
+|---|---|
+| `--transport stdio` | Standard; für lokale Clients wie Claude Code |
+| `--transport http` | Streamable HTTP auf `127.0.0.1:MCP_HTTP_PORT` |
+| `--check-config` | Prüft die Konfiguration offline und gibt eine Zusammenfassung ohne Passwort/Token aus. Mit `--transport http` werden auch die Remote-Einstellungen geprüft. |
+| `--check-nextcloud` | Liest jeden freigegebenen Eintrag per `PROPFIND` (nur lesend), zeigt Typ und Nextcloud-Rechtebuchstaben und warnt, wenn das technische Konto dort schreiben oder löschen könnte (Buchstaben `W C K D N V`). Exit-Code 1 bei Fehlern. |
+| `--version` | Version ausgeben |
+
+Konfigurationsfehler beenden den Server mit Exit-Code 2 und der Meldung `Konfigurationsfehler: …` auf stderr.
+
+## Tests und Qualität
 
 ```bash
-python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
+uv run --extra dev pytest                 # oder: .venv/bin/pytest
+uv run --extra dev pytest --cov           # mit Abdeckung
+uv run --extra dev ruff check .
+uv run --extra dev ruff format --check .
 ```
 
-Dann starten:
+Die GitHub-Actions-Pipeline `.github/workflows/ci.yml` prüft `uv lock --check`, `ruff check` und `ruff format --check` und führt `pytest` unter Python 3.11, 3.12 und 3.13 (Ubuntu) sowie 3.12 auf macOS aus. Ein weiterer Job installiert aus `requirements-dev.lock` mit `--require-hashes` (der dokumentierte pip-Weg). Hinweis: `uv run` ohne `--extra dev` entfernt die Entwicklungswerkzeuge wieder aus `.venv`.
 
-```bash
-source .venv/bin/activate
-python -m levuvo_nextcloud_mcp --transport http
+**Lokaler Teststand v0.5.0 (2026-11-06):** 381 Tests bestanden, 0 fehlgeschlagen, unter Python 3.11 (Installation aus `requirements-dev.lock`), 3.12 und 3.13; Zeilen-/Zweigabdeckung 91 %. `ruff check` und `ruff format --check` ohne Befund.
+
+Die Tests laufen offline gegen nachgebildete WebDAV-Antworten. Ein Test gegen die echte Storage Share und mit realen Clients steht aus (siehe [Kompatibilität](#kompatibilität)).
+
+## Remote-Betrieb
+
+Remote ist optional und für den lokalen Betrieb nicht nötig. Kurzfassung:
+
+- Der Server bindet **nur `127.0.0.1`**. TLS und öffentliche Erreichbarkeit übernimmt ein Reverse-Proxy oder Tunnel.
+- Transport: Streamable HTTP, zustandslos, JSON-Antworten, Endpunkt `/mcp`.
+- Schutz: Host-Header-Allowlist (öffentlicher Host aus `MCP_PUBLIC_URL` und localhost), keine Browser-Origins, Request-Body max. 128 KiB, max. 32 gleichzeitige Verbindungen, kein Server-Header, kein Access-Log.
+- Authentifizierung: `MCP_AUTH_MODE=static` (fester Bearer-Token, schützt alle Routen) oder `oauth` (nur Resource Server; Login und Token-Ausgabe macht ein externer Identity Provider).
+- Die Hetzner Storage Share kann den Python-Dienst **nicht** hosten.
+
+Optionen ohne Pflicht-Hostingkosten (nur lokal, eigener Linux-Server, Tailscale Funnel, Router-Portfreigabe) und alle Details: [docs/REMOTE.md](docs/REMOTE.md). Beispielkonfigurationen: [deploy/](deploy/).
+
+## Kompatibilität
+
+| Client | Technisch implementiert | Automatisiert getestet | Mit realem Client getestet | Nicht verifiziert |
+|---|---|---|---|---|
+| Claude Code lokal (`stdio`) | ja | ja, inkl. echtem stdio-Subprozess mit MCP-Handshake | nein | Betrieb gegen die echte Storage Share und mit der echten Claude-Code-App |
+| Claude Code CLI remote (`--transport http --header`) | ja (Modus `static`) | ja: lokaler Uvicorn-Server auf 127.0.0.1 mit echtem MCP-HTTP-Client, dazu Negativtests für Token, Host, Origin und Body-Limit | nein | Ende-zu-Ende gegen ein echtes Deployment |
+| Claude Web, benutzerdefinierter Connector | ja (Server-Seite) | Server-Seite ja | nein | Gesamtes Zusammenspiel. Braucht öffentliches HTTPS. Laut Claude-Hilfe bietet der Connector OAuth, „kein Login“ und feste Request-Header an; ob `static` damit funktioniert, ist ungeprüft. `oauth` braucht einen Identity Provider, der mit Claudes Ablauf zusammenspielt (automatische Registrierung oder eigener OAuth-Client). |
+| ChatGPT (Developer Mode / eigene MCP-Connectoren) | ja (Server-Seite, `oauth`) | Server-Seite ja | nein | Gesamtes Zusammenspiel. Braucht passenden Tarif (laut OpenAI Developer Mode für Plus, Pro, Business, Enterprise, Education im Web; Workspace-Richtlinien können ihn einschränken), öffentliches HTTPS und OAuth. OpenAI nennt als Authentifizierung nur OAuth, „keine Authentifizierung“ und gemischt – keine festen Header, `static` ist dort also nicht nutzbar. |
+| Claude Code im Web (Cloud-Sitzungen) | – | – | nein | Läuft in der Anthropic-Cloud und erreicht nur einen öffentlichen HTTPS-Endpunkt, keinen Server auf dem Mac. |
+
+Quellen (Stand 2026-11-06): [Claude – Custom Connectors mit Remote-MCP](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp), [OpenAI – ChatGPT Developer Mode](https://developers.openai.com/api/docs/guides/developer-mode), [OpenAI-Hilfe – Developer Mode und MCP-Connectoren](https://help.openai.com/en/articles/12584461-developer-mode-apps-and-full-mcp-connectors-in-chatgpt). Tarife und Oberflächen ändern sich; vor der Einrichtung aktuell nachlesen.
+
+## Fehlerbehebung
+
+Häufige Fälle (Details in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)):
+
+- Python zu alt (`requires-python >=3.11`) → Homebrew `python@3.12` oder uv.
+- `.env` wird nicht gefunden → `LEVUVO_MCP_ENV_FILE` mit absolutem Pfad setzen.
+- 401 → Benutzername oder App-Passwort falsch; 403 → Freigaberechte des Kontos prüfen.
+- Leere Listen oder „Die WebDAV-Antwort enthält den angefragten Pfad nicht“ → `NEXTCLOUD_USER_ID` setzen.
+- „Freigabe-Typ widerspricht Nextcloud“ → `file:`/`dir:` korrigieren.
+- „URL-kodierte Zeichen“ → Pfad unkodiert eintragen.
+- Startfehler bei Ausschlüssen → Ausschluss muss unter einer Freigabe liegen und darf sie nicht ganz sperren.
+- Umlaute in CSV → Feld `encoding` beachten.
+- Gescanntes PDF → keine OCR; Text vorher erzeugen.
+
+## Projektstruktur
+
+```
+levuvo-nextcloud-mcp/
+├── .env.example                 # alle Variablen mit Platzhaltern
+├── pyproject.toml
+├── uv.lock, requirements.lock, requirements-dev.lock
+├── src/levuvo_nextcloud_mcp/
+│   ├── __main__.py              # python -m levuvo_nextcloud_mcp
+│   ├── server.py                # MCP-Werkzeuge, CLI, stdio/HTTP
+│   ├── policy.py                # Pfadnormalisierung, Allow/Deny-Logik
+│   ├── settings.py              # Nextcloud-Konfiguration, .env-Suche
+│   ├── webdav.py                # Nextcloud-Client (nur GET/PROPFIND)
+│   ├── extractors.py            # Text aus TXT/CSV/PDF/DOCX/XLSX
+│   ├── errors.py                # erwartete Fehler mit deutschen Meldungen
+│   ├── remote_settings.py       # Remote-Konfiguration
+│   ├── static_bearer.py         # statischer Bearer-Token
+│   └── jwt_tokens.py            # Prüfung von OAuth-JWT-Access-Tokens
+├── tests/
+├── deploy/                      # Caddy- und systemd-Beispiele
+├── docs/REMOTE.md, docs/TROUBLESHOOTING.md
+├── .github/workflows/ci.yml
+├── SECURITY.md
+└── CHANGELOG.md
 ```
 
-In einem **zweiten Terminal** kann ein Test ohne Token ausgeführt werden:
+## Lizenz
 
-```bash
-curl -i http://127.0.0.1:8765/mcp
-# Erwartung: 401 Unauthorized
-```
-
-Für eine autorisierte MCP-Abfrage verwende den offiziellen MCP Inspector / einen MCP-HTTP-Client. Einen Token nicht direkt in die Shell-History kopieren; HTTP-Testaufrufe auf dem Produktivserver nur über localhost/TLS vornehmen. Die Authentifizierung schützt auch die Discovery- und MCP-Routen.
-
-## C. Claude Web anbinden
-
-Erst **nach** dem HTTPS-Deployment mit gültigem Zertifikat (Abschnitt D) und erfolgreichem Auth-Test:
-
-1. In Claude Web `Anpassen → Connectoren → + Hinzufügen → Benutzerdefinierten Connector hinzufügen` öffnen.
-2. Name: **Levuvo Nextcloud**.
-3. URL: `https://mcp.levuvo.com/mcp`.
-4. Mit `MCP_AUTH_MODE=static`: falls die Oberfläche es anbietet, unter *Request Headers* den Header `Authorization` mit Wert `Bearer <MCP_STATIC_TOKEN>` setzen. Bei Team-/Enterprise-Connectoren ist ein geteilter Schlüssel **nicht pro Benutzer getrennt**.
-5. Connector aktivieren. Nur den Testordner abrufen.
-
-Claude Web ruft über Anthropics Server aus dem Internet ab, nicht über `127.0.0.1` deines MacBooks. Ein lokaler Server ohne Tunnel/Hosting ist daher **nicht erreichbar**.
-
-**Wichtig:** Statischer Bearer-Token ist eine Zwischenlösung für einen eng begrenzten Testbetrieb; für Teams und Unternehmensdaten besser OAuth (siehe E).
-
-## D. Remote-Server veröffentlichen (Caddy / Linux)
-
-**Hetzner Storage Share NX11 hostet nur Nextcloud, nicht euren Python-MCP-Dienst.** Ihr braucht einen eigenen kleinen Linux-Server/Container-Host mit DNS `mcp.levuvo.com`. Dafür kann ein separater Hetzner-VPS verwendet werden. Keine Portweiterleitung auf die Nextcloud selbst.
-
-1. DNS `A/AAAA` von `mcp.levuvo.com` auf die IP eures MCP-Servers setzen.
-2. Projekt nach `/opt/levuvo-nextcloud-mcp` kopieren; venv installieren; `.env` mit restriktiven Dateirechten erstellen; Service-Benutzer ohne Rootrechte einsetzen.
-3. Port `8765` **nicht öffentlich öffnen**; MCP bindet ihn nur an `127.0.0.1`.
-4. Caddy installieren und `deploy/Caddyfile.example` als Ausgangspunkt verwenden. Ports `80`/`443` für automatische HTTPS-Zertifikate verfügbar machen.
-5. `deploy/levuvo-nextcloud-mcp.service.example` prüfen und an den Linux-Server anpassen (insbesondere Benutzer, Pfade, Schreibzugriffe).
-6. **Zuerst** Testordner, TLS und Tokenzugriff prüfen. Öffentlicher Test ohne Token muss `401` ergeben.
-7. Richtigen Connector erst danach hinzufügen. Logs dürfen nie Passwörter, Authorization-Header oder Dokumentinhalte enthalten.
-
-### Erwartetes Ergebnis
-
-- `https://mcp.levuvo.com/mcp` ist aus dem Internet über HTTPS erreichbar.
-- Ohne Token: `401 Unauthorized`.
-- Mit korrektem Token: gültige MCP-Transportantwort (abhängig von HTTP-Methode, MCP-Headern und Nachricht).
-- Mit einem Pfad außerhalb `NEXTCLOUD_ALLOWED_PATHS`: Fehler **ohne Nextcloud-Anfrage**.
-
-## E. OAuth-Modus (optional, für spätere ChatGPT-/Team-Anbindung)
-
-**Nicht** mit dem statischen Bearer-Token verwechseln. Der OAuth-Modus nutzt das MCP-SDK als **OAuth Resource Server**, jedoch **kein eigenes Login-System**. Ihr benötigt vorher einen externen OAuth-2.1-/OIDC-kompatiblen Autorisierungsserver. Dieser muss u. a. Authorization Code + PKCE, passende Client-Registrierung und **RS256-signierte JWT-Access-Tokens** mit `aud`, `iss`, `sub`, `exp` und `scope` bereitstellen. Ein ID-Token ist **kein** Access-Token. Systeme mit ausschließlich opaken Tokens sind mit diesem Verifier nicht kompatibel.
-
-```dotenv
-MCP_AUTH_MODE=oauth
-MCP_PUBLIC_URL=https://mcp.levuvo.com/mcp
-MCP_OAUTH_ISSUER=https://login.example.com/
-MCP_OAUTH_JWKS_URL=https://login.example.com/.well-known/jwks.json
-MCP_OAUTH_AUDIENCE=https://mcp.levuvo.com/mcp
-MCP_OAUTH_SCOPE=files:read
-```
-
-Im OAuth-Modus schützt das SDK `/mcp` und stellt *Protected Resource Metadata* über `/.well-known/oauth-protected-resource/mcp` bereit. Der Code prüft RSA-Signatur, Issuer, Audience, Ablauf und Scope. Die echte IdP-Integration, Registrierung der Clients und End-to-End-Tests sind **noch nicht eingerichtet**. Manche IdPs verwenden einen anderen Audience-Identifier: `MCP_OAUTH_AUDIENCE` muss zum `aud` des **Access Tokens** passen. Den Issuer einschließlich eines eventuellen abschließenden `/` exakt übernehmen.
-
-Für den Einsatz mit ChatGPT muss zusätzlich der gebuchte ChatGPT-Workspace die Erstellung eigener MCP-Connectoren unterstützen. **Keine Garantie, dass jeder IdP unmittelbar mit allen Clients interoperabel ist.**
-
-## F. Tests
-
-```bash
-python -m pip install -e '.[dev]'
-pytest -q
-```
-
-Aktuell getestet: Pfadvalidierung, gemischte Datei-/Ordner-Allowlist, Denylist und Deny-Vorrang, nur `GET`/`PROPFIND`, Datei-Downloads mit Größenlimit, kein Redirect, Dateinamensuche, Dokumentextraktion, Bearer-Auth (auch doppelte Header), Konfigurationsprüfung, JWT-Signatur/Issuer/Audience/Expiry/Scope. **Keine** durchgehenden SDK-, WebDAV- oder Cloud-Connector-Integrationstests (keine reale Instanz/Zugangsdaten vorhanden).
-
-## Quellen
-
-- [MCP Python SDK v2 – Running your server](https://py.sdk.modelcontextprotocol.io/run/)
-- [MCP Python SDK v2 – Authorization](https://py.sdk.modelcontextprotocol.io/run/authorization/)
-- [MCP Python SDK v2 – Deploy & scale](https://py.sdk.modelcontextprotocol.io/run/deploy/)
-- [Claude – Custom remote MCP connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)
-- [ChatGPT – Eigene MCP-Server verbinden](https://help.openai.com/de-de/articles/12584461-connecting-custom-mcp-servers-in-chatgpt)
+MIT, siehe [LICENSE](LICENSE).
