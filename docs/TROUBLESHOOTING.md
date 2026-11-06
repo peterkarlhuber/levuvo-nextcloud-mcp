@@ -65,6 +65,8 @@ The account has no read rights on this path in Nextcloud. Check the share.
 **`File or folder not found` (HTTP 404)**
 Check the path from the perspective of `agent.levuvo`: received shares normally appear in its root folder (depending on the Nextcloud configuration also in a subfolder) and may have been renamed there. Case matters.
 
+If `list_files` or `search_files` **without a path** fail with this message, Nextcloud answered 404 for at least one entry of `NEXTCLOUD_ALLOWED_PATHS`: these calls request every configured entry first and stop at the first error instead of returning a partial result, and the message does not name the entry (confirmed code behaviour). A common cause is an entry that no longer exists for `agent.levuvo` (deleted, renamed, moved or unshared), but a 404 can also have other causes. Run `--check-nextcloud` to see which entry fails. A short-lived occurrence with an undetermined cause was observed during the 0.5.3 live test (see [LIVE_VALIDATION.md](LIVE_VALIDATION.md#observations-and-findings)).
+
 **404 for the test folder: `00_Agent Test` vs. `00_Agent_Test`**
 The name in `NEXTCLOUD_ALLOWED_PATHS` must match the folder name exactly as `agent.levuvo` sees it. The Levuvo test folder is `00_Agent Test` with a **space**; `dir:00_Agent_Test` (underscore) points to a non-existent path and results in a 404. Write the space literally, without quotes and without `%20`: `NEXTCLOUD_ALLOWED_PATHS=dir:00_Agent Test`.
 

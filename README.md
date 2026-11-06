@@ -17,7 +17,9 @@ Read-only MCP server (Model Context Protocol) for Levuvo's Hetzner Storage Share
 - **Remote (optional):** Streamable HTTP on `127.0.0.1` behind a TLS reverse proxy, with a static bearer token or OAuth (external identity provider required).
 - **Read only:** The server sends only `GET` and `PROPFIND` to Nextcloud. There are no tools for writing, deleting, moving or sharing.
 
-> **Status:** Local operation is implemented and covered by automated tests. **User-reported** live tests on 2026-11-06 (macOS, Claude Code in VS Code, the real Storage Share `storage.levuvo.com`): the first test passed 5/5; the second test made 43 MCP calls, 41 PASS and 2 functional search failures (the root folder `00_Agent Test` was not found by the queries "Agent" and "Agent Test"). These failures are fixed in 0.5.1. No access bypass was observed. These results were reported by the user; they are not tests run by the maintainers or by CI. Until the user re-tests live, the 0.5.1 fix is verified by automated tests only.
+> **Status:** Local operation is implemented and covered by automated tests. **User-reported** live tests on 2026-11-06 (macOS, Claude Code in VS Code, the real Storage Share `storage.levuvo.com`): the first test passed 5/5; the second test made 43 MCP calls, 41 PASS and 2 functional search failures (the root folder `00_Agent Test` was not found by the queries "Agent" and "Agent Test"). These failures are fixed in 0.5.1. No access bypass was observed. These results were reported by the user; they are not tests run by the maintainers or by CI.
+>
+> **0.5.3 live regression test (user-reported, 2026-11-06, Claude Desktop on macOS, local `stdio`, same Storage Share):** 16 of 16 checks passed in three runs with 24 MCP calls, including version and active-limit discovery, folder search, `incomplete_reasons`, RTF and sectioned reading, path validation and the denylist; this also confirms the 0.5.1 search fix live. Details, scope and open points: [docs/LIVE_VALIDATION.md](docs/LIVE_VALIDATION.md).
 >
 > A publicly reachable remote endpoint is **not production-ready** and has not been proven in practice: first work through the checklist in [SECURITY.md](SECURITY.md#checklist-before-any-public-operation) and pass tests with the real client. Start by releasing only a test folder without confidential data.
 
@@ -242,7 +244,7 @@ The GitHub Actions pipeline `.github/workflows/ci.yml` checks `uv lock --check`,
 
 **Local test run for 0.5.3 (2026-11-06, Python 3.13, maintainer environment):** 556 tests passed, 0 failed; line/branch coverage 92 %. `ruff check`, `ruff format --check` and `uv lock --check` without findings. CI results for 3.11–3.13, macOS and the lockfile install are shown on the pull request.
 
-The automated tests run offline against simulated WebDAV responses. Tests against the real Storage Share with the real client have so far only been reported by the user (see [Overview and status](#overview-and-status) and [Compatibility](#compatibility)).
+The automated tests run offline against simulated WebDAV responses. Tests against the real Storage Share with the real client have so far only been reported by the user (see [Overview and status](#overview-and-status), [Compatibility](#compatibility) and [docs/LIVE_VALIDATION.md](docs/LIVE_VALIDATION.md)).
 
 ## Remote operation
 
@@ -260,7 +262,8 @@ Options without mandatory hosting costs (local only, own Linux server, Tailscale
 
 | Client | Technically implemented | Automatically tested | Tested with real client | Not verified |
 |---|---|---|---|---|
-| Claude Code local (`stdio`) | yes | yes, incl. a real stdio subprocess with MCP handshake | yes, user-reported (2026-11-06) | The 0.5.1 search fix with the real client (automated tests only so far) |
+| Claude Code local (`stdio`) | yes | yes, incl. a real stdio subprocess with MCP handshake | yes, user-reported (2026-11-06, 0.5.0) | 0.5.1-0.5.3 with Claude Code itself (the same `stdio` server was validated live with Claude Desktop) |
+| Claude Desktop local (`stdio`) | yes | yes (same `stdio` server) | yes, user-reported 0.5.3 live regression, 16/16 checks ([docs/LIVE_VALIDATION.md](docs/LIVE_VALIDATION.md)) | Files near 100 MB, searches over 1000 folders |
 | Claude Code CLI remote (`--transport http --header`) | yes (`static` mode) | yes: local Uvicorn server on 127.0.0.1 with a real MCP HTTP client, plus negative tests for token, host, origin and body limit | no | End-to-end against a real deployment |
 | Claude Web, custom connector | yes (server side) | server side yes | no | The overall interaction. Requires public HTTPS. According to Claude's help, the connector offers OAuth, "no login" and fixed request headers; whether `static` works with it is unchecked. `oauth` needs an identity provider that works with Claude's flow (automatic registration or a dedicated OAuth client). |
 | ChatGPT (Developer Mode / custom MCP connectors) | yes (server side, `oauth`) | server side yes | no | The overall interaction. Requires a suitable plan (according to OpenAI, Developer Mode is available for Plus, Pro, Business, Enterprise, Education on the web; workspace policies can restrict it), public HTTPS and OAuth. OpenAI lists only OAuth, "no authentication" and mixed as authentication – no fixed headers, so `static` cannot be used there. |
@@ -305,7 +308,7 @@ levuvo-nextcloud-mcp/
 │   └── jwt_tokens.py            # verification of OAuth JWT access tokens
 ├── tests/
 ├── deploy/                      # Caddy and systemd examples
-├── docs/LOCAL_SETUP_MACOS.md, docs/MCP_TOOLS.md, docs/REMOTE.md, docs/TROUBLESHOOTING.md, docs/PERFORMANCE_0.5.2.md
+├── docs/LOCAL_SETUP_MACOS.md, docs/MCP_TOOLS.md, docs/REMOTE.md, docs/TROUBLESHOOTING.md, docs/PERFORMANCE_0.5.2.md, docs/LIVE_VALIDATION.md
 ├── .github/workflows/ci.yml
 ├── SECURITY.md
 └── CHANGELOG.md
