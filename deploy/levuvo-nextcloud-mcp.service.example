@@ -1,0 +1,69 @@
+# Beispiel für einen eigenen Linux-Server (nicht auf einem echten Server getestet).
+# Ziel: /etc/systemd/system/levuvo-nextcloud-mcp.service
+#
+# Vorbereitung (als root):
+#   useradd --system --home /nonexistent --shell /usr/sbin/nologin levuvomcp
+#   Projekt nach /opt/levuvo-nextcloud-mcp, venv dort anlegen (siehe README),
+#   Verzeichnis root gehören lassen (Dienst braucht nur Leserechte).
+#   install -d -m 0700 -o levuvomcp -g levuvomcp /etc/levuvo-nextcloud-mcp
+#   install -m 0600 -o levuvomcp -g levuvomcp .env /etc/levuvo-nextcloud-mcp/levuvo.env
+#   (0600: der Server warnt, wenn die Datei für Gruppe/andere lesbar ist.)
+#
+# Danach: systemctl daemon-reload && systemctl enable --now levuvo-nextcloud-mcp
+# Härtung prüfen: systemd-analyze security levuvo-nextcloud-mcp
+
+[Unit]
+Description=Levuvo Nextcloud MCP (read-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=levuvomcp
+Group=levuvomcp
+WorkingDirectory=/opt/levuvo-nextcloud-mcp
+
+# Konfiguration: Der Server liest die Datei selbst (python-dotenv, gleiche Syntax wie lokal).
+Environment=LEVUVO_MCP_ENV_FILE=/etc/levuvo-nextcloud-mcp/levuvo.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+# Alternative: systemd setzt die Variablen direkt. Achtung: systemd interpretiert
+# Anführungszeichen und Sonderzeichen anders als python-dotenv. Echte Umgebungsvariablen
+# haben Vorrang vor LEVUVO_MCP_ENV_FILE.
+#EnvironmentFile=/etc/levuvo-nextcloud-mcp/levuvo.env
+
+# Lauscht nur auf 127.0.0.1:MCP_HTTP_PORT; TLS macht Caddy (siehe Caddyfile.example).
+ExecStart=/opt/levuvo-nextcloud-mcp/.venv/bin/levuvo-nextcloud-mcp --transport http
+Restart=on-failure
+RestartSec=5
+
+# --- Härtung ---
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Falls die Namensauflösung scheitert, AF_NETLINK ergänzen.
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+# MemoryDenyWriteExecute=true bewusst NICHT gesetzt: kann mit manchen
+# Python-Bibliotheken (z. B. cffi/cryptography) Abstürze verursachen.
+
+# Ressourcen
+MemoryMax=512M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target
