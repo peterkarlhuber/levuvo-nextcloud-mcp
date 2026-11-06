@@ -104,19 +104,34 @@ The `encoding` field in the response shows the detected encoding. `cp1252` is ty
 The file extension is a text format, but the content is not. Check the file.
 
 **PDF returns no text / note "possibly a scanned PDF (no OCR)"**
-There is no OCR. Run text recognition on the PDF beforehand. Encrypted PDFs are not read. Nothing from page 41 onwards is processed.
+There is no OCR. Run text recognition on the PDF beforehand. Encrypted PDFs are not read. At most 5000 pages are processed; `extraction_notes` says when pages were skipped.
 
 **Text from DOCX is missing**
 Only paragraphs and tables of the main body are read – no headers/footers, text boxes or comments.
 
 **XLSX shows no formula results or is incomplete**
-Only values stored in the file are read; formulas are not evaluated (save the file in Excel so that values are present). Limits: 10 sheets, 1000 rows, 60 columns (`truncated: true`).
+Only values stored in the file are read; formulas are not evaluated (save the file in Excel so that values are present). Limits: 200 sheets and 200 columns; skipped sheets or columns are listed in `extraction_notes` and `extraction_complete` is `false`.
 
 **`The file exceeds the download limit`**
-Increase `NEXTCLOUD_MAX_FILE_BYTES` (max. 30000000) or use a smaller file.
+Increase `NEXTCLOUD_MAX_FILE_BYTES` (default 25000000, max. 100000000; see docs/PERFORMANCE_0.5.2.md for the memory needed) or use a smaller file.
+
+**Only part of a long document is returned**
+This is expected: each call returns at most `max_chars` characters. If `has_more` is `true`, call `read_file` again with `offset` set to `next_offset` and the returned `etag`. `extraction_complete: false` means that a limit (25,000,000 characters, 90 seconds, 5000 PDF pages, 200 sheets/columns) stopped extraction; the reason is in `extraction_notes`.
+
+**`The file has changed since the previous read_file call (ETag mismatch)`**
+The file was modified between two section calls. Read it again from `offset` 0 without `etag`; earlier sections may no longer match.
+
+**`offset … is beyond the end of the extracted text`**
+Use `next_offset` from the previous response; `total_chars` is the length of the extracted text.
 
 **`File format … is not supported`**
-Supported: text formats (see README), `.pdf`, `.docx`, `.xlsx`. Convert old formats (`.doc`, `.xls`) beforehand.
+Supported: text formats (see README), `.pdf`, `.docx`, `.xlsx`, `.rtf` (since 0.5.2). Convert old formats (`.doc`, `.xls`) beforehand.
+
+**`The RTF file is damaged or not a valid RTF document.`**
+The file does not start with `{\rtf`, is cut off inside a control sequence or contains an invalid escape. Often the file is a different format with an `.rtf` extension (e.g. a renamed `.doc` or `.docx`). Open and save it again as RTF, or convert it to `.docx`/`.pdf`.
+
+**RTF text is missing headers, footers, footnotes or images**
+Intended: only the main body text is extracted; embedded objects and pictures are skipped and never executed.
 
 **`search_files` does not find content**
 The search only checks file and folder names. `complete: false` means that the depth, the number of results or the limit of 100 folders was reached.

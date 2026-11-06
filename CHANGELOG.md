@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.5.2 – 2026-11-06
+
+Feature release: RTF support and large-file support with sectioned reading. Same four tools and the same read-only model (`GET`/`PROPFIND` only); existing parameters and result fields are unchanged, new ones are optional or additive. No new dependencies; lockfiles unchanged.
+
+### Added
+
+- **Sectioned reading in `read_file`.** New optional parameters `offset` (default 0), `etag` and `html_visible_text`. New result fields `offset`, `returned_chars`, `next_offset`, `has_more`, `total_chars`, `extraction_complete`, `etag`, plus `extraction_notes` and, for PDF pages and XLSX sheets, `sections` (title and offset). `max_chars` stays the per-call limit (100–30000), so a long document is read in several calls with `offset=next_offset`; concatenating the sections reproduces the extracted text without gaps.
+- **Change detection between calls.** Passing the `etag` of a previous response makes the call fail with `The file has changed since the previous read_file call (ETag mismatch). …` instead of mixing two versions of a file.
+- **Bounded extraction cache.** Extracted text is kept for up to 10 minutes (max. 96 MB and 8 entries, LRU, keyed by path and ETag), so follow-up sections need one `PROPFIND` and no new download. Access checks still run on every call.
+- **Optional visible text for HTML** (`html_visible_text=true`): scripts, styles and markup are removed with the standard library HTML parser.
+- Server instructions tell the agent to continue reading when the task requires it, never to treat a partial extraction as the complete document, and to stop early for simple questions.
+
+- **`read_file` reads `.rtf` (Rich Text Format).** Paragraphs, line breaks, tabs and table rows (cells separated by ` | `) are extracted; formatting commands are removed. Umlauts and other characters are decoded from `\'hh` escapes using the document code page (`\ansicpg`) or the font charset (`\fcharset`), Unicode from `\uN` (including `\ucN` fallback skipping and surrogate pairs for characters outside the BMP) and raw 8-bit bytes.
+- Fonts, colours, styles, document metadata, headers, footers, footnotes, comments, field instructions (the visible field result is kept), embedded objects, pictures and `\binN` binary data are skipped and never interpreted or executed.
+
+### Changed
+
+- **Larger files.** `NEXTCLOUD_MAX_FILE_BYTES` default raised from 8,000,000 to 25,000,000 bytes; the allowed range is now 1–100,000,000 (was 1–30,000,000). Both values were checked with measurements, see `docs/PERFORMANCE_0.5.2.md`.
+- **Streaming downloads.** Files are streamed into a spooled temporary file (memory up to 4 MB, then an anonymous file on disk that is deleted after extraction, also on errors) instead of being held in memory. Text formats are decoded incrementally.
+- **Higher format limits.** PDF up to 5000 pages (was 40) with `[Page N]` markers; XLSX up to 200 sheets and 200 columns with all rows (was 10 sheets, 1000 rows, 60 columns); long DOCX, RTF, HTML, TXT, MD, CSV and JSON files are fully reachable. Per file at most 25,000,000 characters are extracted within 90 seconds; when a limit stops extraction, `extraction_complete` is `false` and `extraction_notes` says why.
+- XLSX rows now carry their Excel row number (`12: a | b`); empty rows are skipped.
+- `truncated` is now `true` whenever the response does not contain the complete document (`has_more`, `offset > 0` or incomplete extraction). Limit notes that 0.5.1 appended to `text` are now in `extraction_notes`; the scanned-PDF note stays in the text.
+- Concurrency: at most 2 extraction threads as before, and only one of them for files above 16 MB or of unknown size.
+
+### Security
+
+- Office zip-bomb check extended: at most 5000 entries, 600 MB uncompressed in total, 300 MB per entry, a compression-ratio limit for large archives, and 60 MB for the main XML part (`word/document.xml`, `xl/sharedStrings.xml`).
+- The RTF reader is built into the project instead of using a third-party library. Every token pattern is bounded or a plain character class, so scanning is linear in the input size even for crafted files; binary payloads are skipped by their declared length; nesting deeper than 256 groups is rejected (`The RTF file is nested too deeply.`). The reviewed library candidate (`striprtf`) applies regular expressions with unbounded `.*` to whole lines of the document and does not handle `\bin` outside pictures, which was not acceptable for untrusted input.
+- The RTF reader is bound by the same limits as the other formats: download limit, character and time budget, at most 2 parallel extraction threads.
+- Damaged or invalid files (no `{\rtf` header, invalid `\'` escape, truncated control sequence, overlong control word, `\bin` beyond the end of the file) are rejected with `The RTF file is damaged or not a valid RTF document.` A document that only lacks closing braces is read as far as it goes, like word processors do.
+
+### Documentation and tests
+
+- `read_file` tool description, server instructions, README, `docs/MCP_TOOLS.md` (with a multi-call example), `docs/TROUBLESHOOTING.md`, `docs/LOCAL_SETUP_MACOS.md`, SECURITY.md and `.env.example` updated. New `docs/PERFORMANCE_0.5.2.md` with the measurements behind the limits.
+- New `tests/test_large_documents.py`: gap-free reconstruction over many offset calls, end boundary, invalid and negative offsets, PDF with 120 pages, large DOCX and RTF, XLSX with many sheets and rows, raw and visible HTML, character and time budgets, PDF page limit, sizes just below, at and above the download limit, a file changed between calls, temporary files closed on success and failure, memory peak for a 21 MB CSV, cache bounds and TTL, unchanged access controls.
+- New `tests/test_rtf_extraction.py`: valid documents, umlauts, Unicode and surrogates, Cyrillic, Central European and Japanese code pages, tables, special characters, skipped destinations, objects/pictures/binary data, damaged files, nesting and `max_chars` limits, a linear-time check with large crafted input, and `read_file` through the real MCP tool including the download limit.
+
 ## 0.5.1 – 2026-11-06
 
 Patch release. Backward compatible: same four tools, same parameters, same environment variables, same read-only model (`GET`/`PROPFIND` only).

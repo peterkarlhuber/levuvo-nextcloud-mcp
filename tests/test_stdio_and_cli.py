@@ -65,7 +65,7 @@ def test_check_config_prints_summary_without_secrets(tmp_path: Path) -> None:
     result = run_cli(tmp_path, "--check-config")
     assert result.returncode == 0, result.stderr
     summary = json.loads(result.stdout)
-    assert summary["version"] == "0.5.1"
+    assert summary["version"] == "0.5.2"
     assert summary["allowed_paths"] == ["dir:00_Agent_Test"]
     assert summary["denied_paths"] == ["dir:00_Agent_Test/Intern"]
     assert "DUMMY_TEST_SECRET" not in result.stdout + result.stderr
@@ -92,7 +92,7 @@ def test_check_nextcloud_reports_network_failure(tmp_path: Path) -> None:
 
 def test_version_flag(tmp_path: Path) -> None:
     result = run_cli(tmp_path, "--version")
-    assert result.returncode == 0 and result.stdout.strip().endswith("0.5.1")
+    assert result.returncode == 0 and result.stdout.strip().endswith("0.5.2")
 
 
 def test_permissive_env_file_warning_on_stderr(tmp_path: Path) -> None:

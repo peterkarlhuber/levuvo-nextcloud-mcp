@@ -12,7 +12,7 @@ Read-only MCP server (Model Context Protocol) for Levuvo's Hetzner Storage Share
 
 ## Overview and status
 
-- **Version:** 0.5.1 (Python 3.11+, MIT license).
+- **Version:** 0.5.2 (Python 3.11+, MIT license).
 - **Local (default):** Claude Code starts the server via `stdio` on the Mac. No open port, no hosting.
 - **Remote (optional):** Streamable HTTP on `127.0.0.1` behind a TLS reverse proxy, with a static bearer token or OAuth (external identity provider required).
 - **Read only:** The server sends only `GET` and `PROPFIND` to Nextcloud. There are no tools for writing, deleting, moving or sharing.
@@ -30,20 +30,23 @@ Full reference: [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
 | `list_files` | `path` (empty = all released entries), `limit` 1–250, default 100 | Released entries, or the immediate contents of a released folder (`folder`, `items`, `truncated`) |
 | `get_file_info` | `path` | Metadata without content: type, size, content type, modification date, ETag, Nextcloud permissions |
 | `search_files` | `query` 1–120 characters, `max_depth` 0–6 (default 3), `max_results` 1–100 (default 25) | Matches in the **file or folder name** (no full-text search); since 0.5.1 the name search also matches the explicitly released root folders and files themselves; `complete` shows whether the search was exhaustive |
-| `read_file` | `path`, `max_chars` 100–30000 (default 16000) | Text of the file (`format`, `size_bytes`, `text`, `truncated`, plus `encoding` for text files) |
+| `read_file` | `path`, `max_chars` 100–30000 (default 16000), since 0.5.2 optional `offset` (default 0), `etag`, `html_visible_text` | One section of the extracted text (`format`, `size_bytes`, `text`, `truncated`, `encoding` for text files; since 0.5.2 `offset`, `returned_chars`, `next_offset`, `has_more`, `total_chars`, `extraction_complete`, `etag`, `sections`). Long documents are read in several calls with `offset=next_offset` |
 
 All four tools carry the MCP annotations `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true` and `openWorldHint=false` (one fixed Nextcloud, closed scope). The annotations only describe the behavior; it is enforced in the code.
 
 Expected errors (path not released, file too large, Nextcloud unreachable …) are returned as MCP tool errors with a clear message. On unexpected crashes the client receives only a generic message (`Error executing tool <name>`); details go to the server log on stderr.
 
-**Formats supported by `read_file`:** text formats (`.txt .md .markdown .csv .tsv .json .jsonl .yaml .yml .xml .html .htm .log .toml .ini .cfg .py .js .ts .css .sql .rst`), `.pdf`, `.docx`, `.xlsx`.
+**Formats supported by `read_file`:** text formats (`.txt .md .markdown .csv .tsv .json .jsonl .yaml .yml .xml .html .htm .log .toml .ini .cfg .py .js .ts .css .sql .rst`), `.pdf`, `.docx`, `.xlsx`, `.rtf`.
 
 - Text: UTF-8 (with or without BOM), UTF-16 with BOM, otherwise Windows-1252 (`encoding: "cp1252"`, typical for Excel CSV). Binary content is rejected.
-- PDF: at most 40 pages, no OCR; scanned PDFs produce a note. Encrypted PDFs are rejected.
+- PDF: up to 5000 pages with `[Page N]` markers, no OCR; scanned PDFs produce a note. Encrypted PDFs are rejected.
 - DOCX: paragraphs and tables of the main body in document order (no headers/footers, text boxes, comments).
-- XLSX: at most 10 sheets, 1000 rows, 60 columns; stored values only, formulas are not evaluated.
+- XLSX: up to 200 sheets and 200 columns, all rows (`[Sheet: name]` markers, rows as `12: a | b` with the Excel row number); stored values only, formulas are not evaluated.
+- HTML: raw source by default; `html_visible_text=true` returns only the visible text (scripts, styles and markup removed).
+- RTF (since 0.5.2): paragraphs, table rows (cells separated by ` | `), umlauts and Unicode; formatting is removed. Embedded objects, pictures, headers, footers and footnotes are skipped, never executed. Damaged RTF files produce a clear error message.
 - Office files are checked for zip bombs before extraction; damaged documents produce a clear error message.
-- Download limit: `NEXTCLOUD_MAX_FILE_BYTES` (default 8 MB).
+- Download limit: `NEXTCLOUD_MAX_FILE_BYTES` (default 25 MB, configurable up to 100 MB), streamed into a temporary file that is deleted after extraction.
+- Long documents (since 0.5.2): each call returns at most `max_chars` characters; `has_more`/`next_offset` tell the agent how to continue. Up to 25,000,000 extracted characters per file (90 s extraction time); beyond that `extraction_complete` is `false` and `extraction_notes` explains why. See [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md#reading-long-documents-in-sections) and the measurements in [docs/PERFORMANCE_0.5.2.md](docs/PERFORMANCE_0.5.2.md).
 
 ## Quick start: macOS with Claude Code
 
@@ -182,7 +185,7 @@ Values come from real environment variables or a `.env` file. Real environment v
 | `NEXTCLOUD_USER_ID` | no | = login name | WebDAV user ID, if it differs from the login name (e.g. login by email address) |
 | `NEXTCLOUD_ALLOWED_PATHS` | yes | – | Released entries, see [Permissions](#permissions) |
 | `NEXTCLOUD_DENIED_PATHS` | no | empty | Exceptions |
-| `NEXTCLOUD_MAX_FILE_BYTES` | no | `8000000` | Download limit for `read_file`, 1–30000000 |
+| `NEXTCLOUD_MAX_FILE_BYTES` | no | `25000000` | Download limit for `read_file`, 1–100000000 |
 | `NEXTCLOUD_TIMEOUT_SECONDS` | no | `20` | Timeout for Nextcloud requests, 1–120 |
 | `LEVUVO_MCP_ENV_FILE` | no | – | Explicit path to the `.env` |
 | `MCP_PUBLIC_URL` | HTTP only | `https://mcp.levuvo.com/mcp` | Public HTTPS address, must end in `/mcp`, port 443 only |
@@ -221,7 +224,7 @@ uv run --extra dev ruff format --check .
 
 The GitHub Actions pipeline `.github/workflows/ci.yml` checks `uv lock --check`, `ruff check` and `ruff format --check` and runs `pytest` on Python 3.11, 3.12 and 3.13 (Ubuntu) and 3.12 on macOS. Another job installs from `requirements-dev.lock` with `--require-hashes` (the documented pip route). Note: `uv run` without `--extra dev` removes the development tools from `.venv` again.
 
-**Local test run for 0.5.1 (2026-11-06, Python 3.13, maintainer environment):** 441 tests passed, 0 failed; line/branch coverage 92 %. `ruff check`, `ruff format --check` and `uv lock --check` without findings. CI results for 3.11–3.13, macOS and the lockfile install are shown on the pull request.
+**Local test run for 0.5.2 (2026-11-06, Python 3.13, maintainer environment):** 478 tests passed, 0 failed; line/branch coverage 92 %. `ruff check`, `ruff format --check` and `uv lock --check` without findings. CI results for 3.11–3.13, macOS and the lockfile install are shown on the pull request.
 
 The automated tests run offline against simulated WebDAV responses. Tests against the real Storage Share with the real client have so far only been reported by the user (see [Overview and status](#overview-and-status) and [Compatibility](#compatibility)).
 
@@ -278,14 +281,15 @@ levuvo-nextcloud-mcp/
 │   ├── policy.py                # path normalization, allow/deny logic
 │   ├── settings.py              # Nextcloud configuration, .env lookup
 │   ├── webdav.py                # Nextcloud client (GET/PROPFIND only)
-│   ├── extractors.py            # text from TXT/CSV/PDF/DOCX/XLSX
+│   ├── extractors.py            # text from TXT/CSV/HTML/PDF/DOCX/XLSX/RTF
+│   ├── doc_cache.py             # bounded cache of extracted text (path + ETag)
 │   ├── errors.py                # expected errors with user-facing messages
 │   ├── remote_settings.py       # remote configuration
 │   ├── static_bearer.py         # static bearer token
 │   └── jwt_tokens.py            # verification of OAuth JWT access tokens
 ├── tests/
 ├── deploy/                      # Caddy and systemd examples
-├── docs/LOCAL_SETUP_MACOS.md, docs/MCP_TOOLS.md, docs/REMOTE.md, docs/TROUBLESHOOTING.md
+├── docs/LOCAL_SETUP_MACOS.md, docs/MCP_TOOLS.md, docs/REMOTE.md, docs/TROUBLESHOOTING.md, docs/PERFORMANCE_0.5.2.md
 ├── .github/workflows/ci.yml
 ├── SECURITY.md
 └── CHANGELOG.md

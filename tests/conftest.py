@@ -94,7 +94,7 @@ class FakeNextcloud:
                 f"<d:getcontentlength>{size}</d:getcontentlength>"
                 f"<d:getcontenttype>{'httpd/unix-directory' if is_dir else 'application/octet-stream'}</d:getcontenttype>"
                 f"<d:getlastmodified>{formatdate(0, usegmt=True)}</d:getlastmodified>"
-                f'<d:getetag>"etag-{abs(hash(path))}"</d:getetag>'
+                f'<d:getetag>"etag-{abs(hash((path, self.files.get(path))))}"</d:getetag>'
                 f"{self._permissions_xml(path)}{self.extra_props.get(path, '')}"
                 "</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
             )

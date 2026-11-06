@@ -47,3 +47,7 @@ class NextcloudError(LevuvoError):
 
 # Backwards-compatible name used by earlier versions of the code base.
 WebDAVError = NextcloudError
+
+
+class FileChangedError(LevuvoError):
+    """The file has a different ETag than the caller expected (changed between two calls)."""
