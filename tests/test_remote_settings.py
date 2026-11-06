@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from levuvo_nextcloud_mcp.remote_settings import RemoteSettings
-from levuvo_nextcloud_mcp.settings import ConfigurationError
+from levuvo_nextcloud_mcp.errors import ConfigurationError
 
 
 def good() -> RemoteSettings:

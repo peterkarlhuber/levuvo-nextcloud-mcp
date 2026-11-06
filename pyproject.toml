@@ -4,27 +4,37 @@ build-backend = "hatchling.build"
 
 [project]
 name = "levuvo-nextcloud-mcp"
-version = "0.4.0"
+dynamic = ["version"]
 description = "Read-only Nextcloud WebDAV MCP server for Levuvo"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
-    "mcp>=2.0,<3.0",
-    "httpx>=0.27,<1.0",
+    "mcp>=2.3,<2.4",
+    "httpx>=0.28,<0.29",
+    "pydantic>=2.11,<3",
     "python-dotenv>=1.0,<2.0",
-    "PyJWT[crypto]>=2.9,<3.0",
+    "PyJWT[crypto]>=2.10,<3.0",
     "uvicorn>=0.30,<1.0",
-    "defusedxml>=0.7.1,<1.0",
-    "pypdf>=5.0,<7.0",
+    "defusedxml>=0.7.1,<0.8",
+    "pypdf>=6.0,<7.0",
     "python-docx>=1.1,<2.0",
     "openpyxl>=3.1,<4.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2"]
+dev = [
+    "pytest>=8,<10",
+    "pytest-asyncio>=1.0,<2",
+    "pytest-cov>=5,<8",
+    "ruff>=0.8",
+]
 
 [project.scripts]
 levuvo-nextcloud-mcp = "levuvo_nextcloud_mcp.server:main"
+
+[tool.hatch.version]
+path = "src/levuvo_nextcloud_mcp/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/levuvo_nextcloud_mcp"]
@@ -32,3 +42,25 @@ packages = ["src/levuvo_nextcloud_mcp"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra --strict-markers"
+filterwarnings = ["error::pytest.PytestUnraisableExceptionWarning"]
+
+[tool.coverage.run]
+source = ["levuvo_nextcloud_mcp"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "RUF"]
+ignore = ["S101", "E501", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S108", "S603", "S310"]

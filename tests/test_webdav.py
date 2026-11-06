@@ -6,7 +6,8 @@ from urllib.parse import unquote, urlsplit
 import httpx
 import pytest
 
-from levuvo_nextcloud_mcp.settings import Settings, validate_path
+from levuvo_nextcloud_mcp.policy import normalize_path as validate_path
+from levuvo_nextcloud_mcp.settings import Settings
 from levuvo_nextcloud_mcp.webdav import NextcloudWebDAV
 
 BASE = "/remote.php/dav/files/agent.levuvo"
@@ -157,6 +158,6 @@ def test_credentials_are_not_part_of_url() -> None:
 
 def test_nextcloud_password_placeholder_rejected() -> None:
     from dataclasses import replace
-    from levuvo_nextcloud_mcp.settings import ConfigurationError
+    from levuvo_nextcloud_mcp.errors import ConfigurationError
     with pytest.raises(ConfigurationError):
         replace(config(), app_password="EIGENES_NEXTCLOUD_APP_PASSWORT")

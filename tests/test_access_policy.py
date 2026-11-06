@@ -8,8 +8,12 @@ from xml.sax.saxutils import escape
 import httpx
 import pytest
 
-from levuvo_nextcloud_mcp.settings import ConfigurationError, Settings, parse_allowed_path, validate_path
-from levuvo_nextcloud_mcp.webdav import NextcloudWebDAV, WebDAVError
+from levuvo_nextcloud_mcp.errors import ConfigurationError
+from levuvo_nextcloud_mcp.policy import normalize_path as validate_path
+from levuvo_nextcloud_mcp.policy import parse_rule
+from levuvo_nextcloud_mcp.settings import Settings
+from levuvo_nextcloud_mcp.errors import NextcloudError as WebDAVError
+from levuvo_nextcloud_mcp.webdav import NextcloudWebDAV
 
 BASE = "/remote.php/dav/files/agent.levuvo"
 
@@ -85,12 +89,15 @@ def test_explicit_file_path_is_exact_match() -> None:
     assert s.require_allowed("06_Marketing/CI.pdf") == "06_Marketing/CI.pdf"
     with pytest.raises(PermissionError):
         s.require_allowed("06_Marketing/CI.pdf/child")
-    assert parse_allowed_path("dir:05_Projekte").kind == "dir"
-    assert parse_allowed_path("07_Ablage/DateiOhneEndung").kind == "auto"
+    assert parse_rule("dir:05_Projekte", "TEST").kind == "dir"
+    assert parse_rule("07_Ablage/DateiOhneEndung", "TEST").kind == "auto"
 
 
 def test_denial_always_wins_even_if_explicit_allow_file() -> None:
-    s = cfg("05_Projekte", "file:05_Projekte/Vertraulich/Kundenvertrag.pdf", denied=("05_Projekte/Vertraulich",))
+    # v0.5: an allow entry that is completely covered by a deny is a contradiction -> startup error.
+    with pytest.raises(ConfigurationError, match="vollständig gesperrt"):
+        cfg("05_Projekte", "file:05_Projekte/Vertraulich/Kundenvertrag.pdf", denied=("05_Projekte/Vertraulich",))
+    s = cfg("05_Projekte", denied=("05_Projekte/Vertraulich",))
     with pytest.raises(PermissionError):
         s.require_allowed("05_Projekte/Vertraulich/Kundenvertrag.pdf")
 

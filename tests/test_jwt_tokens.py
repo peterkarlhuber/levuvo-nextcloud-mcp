@@ -35,7 +35,7 @@ async def test_jwt_signature_audience_scope_and_expiry(signer):
     class SigningKey:
         key = signer.public_key()
 
-    verifier.jwks.get_signing_key_from_jwt = lambda value: SigningKey()
+    verifier.signing_key = lambda kid: SigningKey()
     approved = await verifier.verify(token(signer))
     assert approved is not None and approved.subject == 'user-42'
     assert approved.scopes == ('files:read', 'other:scope')

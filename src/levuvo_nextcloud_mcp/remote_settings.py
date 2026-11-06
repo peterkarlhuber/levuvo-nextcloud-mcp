@@ -3,19 +3,27 @@
 Do not reuse the Nextcloud password as the client authentication token.
 HTTP is always bound to localhost and must be placed behind TLS reverse proxy.
 """
+
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
-from .settings import ConfigurationError
+from .errors import ConfigurationError
 
 
 def https_endpoint(value: str, *, path: str | None = None) -> str:
     parsed = urlsplit(value)
-    if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
-            or parsed.query or parsed.fragment or parsed.port not in (None, 443)):
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.port not in (None, 443)
+    ):
         raise ConfigurationError("Remote-URLs müssen öffentliche HTTPS-Adressen ohne Zugangsdaten sein.")
     if path is not None and parsed.path != path:
         raise ConfigurationError(f"Remote-Endpunkt muss auf {path} enden.")
@@ -27,7 +35,7 @@ class RemoteSettings:
     public_url: str
     auth_mode: str
     port: int = 8765
-    static_token: str = ""
+    static_token: str = field(default="", repr=False)
     oauth_issuer: str = ""
     oauth_jwks_url: str = ""
     oauth_audience: str = ""
@@ -40,10 +48,15 @@ class RemoteSettings:
         if not (1024 <= self.port <= 65535):
             raise ConfigurationError("MCP_HTTP_PORT muss zwischen 1024 und 65535 liegen.")
         if self.auth_mode == "static":
-            if (len(self.static_token) < 32 or len(self.static_token) > 512
-                    or self.static_token.startswith("HIER_")
-                    or any(c.isspace() for c in self.static_token)):
-                raise ConfigurationError("MCP_STATIC_TOKEN muss ein zufälliges Token ohne Leerzeichen mit >=32 Zeichen sein.")
+            if (
+                len(self.static_token) < 32
+                or len(self.static_token) > 512
+                or self.static_token.startswith("HIER_")
+                or any(c.isspace() for c in self.static_token)
+            ):
+                raise ConfigurationError(
+                    "MCP_STATIC_TOKEN muss ein zufälliges Token ohne Leerzeichen mit >=32 Zeichen sein."
+                )
         else:
             https_endpoint(self.oauth_issuer)
             https_endpoint(self.oauth_jwks_url)
