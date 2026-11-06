@@ -425,9 +425,15 @@ async def test_check_access_reports_write_permissions(make_settings, nextcloud) 
     nextcloud.permissions = "RGDNVCK"
     async with client(make_settings("dir:05_Projekte/Offen"), nextcloud) as dav:
         report = await dav.check_access()
-    assert report == [
-        {"entry": "dir:05_Projekte/Offen", "is_dir": True, "permissions": "RGDNVCK", "writable_in_nextcloud": True}
-    ]
+    # 0.5.0 keys keep their values; 0.5.1 only adds fields (see test_v051_check_access.py).
+    [entry] = report
+    assert {key: entry[key] for key in ("entry", "is_dir", "permissions", "writable_in_nextcloud")} == {
+        "entry": "dir:05_Projekte/Offen",
+        "is_dir": True,
+        "permissions": "RGDNVCK",
+        "writable_in_nextcloud": True,
+    }
+    assert entry["assessment"] == "write_possible" and entry["content_writable"] is True
 
 
 async def test_only_get_and_propfind_are_possible(make_settings, nextcloud) -> None:

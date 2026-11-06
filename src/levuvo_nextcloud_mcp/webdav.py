@@ -23,21 +23,35 @@ from . import __version__
 from .errors import (
     AccessDeniedError,
     InvalidArgumentError,
+    LevuvoError,
     LimitExceededError,
     NextcloudError,
     NotFoundError,
 )
 from .extractors import extract_text
-from .policy import ACCESS_DENIED_MESSAGE, PathRule
+from .policy import ACCESS_DENIED_MESSAGE, PathRule, fold_key
 from .settings import Settings
 
 DAV = "{DAV:}"
 OC = "{http://owncloud.org/ns}"
+NC = "{http://nextcloud.org/ns}"
+OCS = "{http://open-collaboration-services.org/ns}"
 PROPFIND_XML = b"""<?xml version="1.0" encoding="utf-8"?>
 <d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
   <d:prop>
     <d:resourcetype/><d:getcontentlength/><d:getcontenttype/>
     <d:getlastmodified/><d:getetag/><oc:permissions/>
+  </d:prop>
+</d:propfind>"""
+# Only used by --check-nextcloud: additionally asks for share/mount metadata documented in the
+# Nextcloud WebDAV API (nc:mount-type, nc:is-mount-root, ocs:share-permissions).
+PROPFIND_DIAGNOSTIC_XML = b"""<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns"
+            xmlns:ocs="http://open-collaboration-services.org/ns">
+  <d:prop>
+    <d:resourcetype/><d:getcontentlength/><d:getcontenttype/>
+    <d:getlastmodified/><d:getetag/><oc:permissions/>
+    <nc:mount-type/><nc:is-mount-root/><ocs:share-permissions/>
   </d:prop>
 </d:propfind>"""
 ALLOWED_METHODS = frozenset({"GET", "PROPFIND"})
@@ -49,6 +63,11 @@ EXTRACTION_CONCURRENCY = 2
 TYPE_CACHE_SECONDS = 300.0
 # Nextcloud permission letters that mean the technical account could modify something.
 WRITE_PERMISSION_LETTERS = frozenset("WCKDNV")
+# Letters that also appear on the mount point of a received share (unshare/rename the mount).
+MOUNT_POINT_LETTERS = frozenset("DNV")
+# ocs:share-permissions bits: 1 read, 2 update, 4 create, 8 delete, 16 share.
+SHARE_PERMISSION_NAMES = {1: "lesen", 2: "ändern", 4: "erstellen", 8: "löschen", 16: "weiterteilen"}
+SHARE_WRITE_BITS = 2 | 4 | 8
 
 
 @dataclass(frozen=True)
@@ -149,21 +168,21 @@ class NextcloudWebDAV:
         return bytes(data)
 
     # ------------------------------------------------------------------ PROPFIND
-    async def _propfind(self, path: str, depth: int) -> list[FileInfo]:
+    async def _propfind(self, path: str, depth: int, *, diagnostics: dict | None = None) -> list[FileInfo]:
         path = self.policy.check(path)
         await self._check_containment(path)
         async with self._request(
             "PROPFIND",
             self._url(path, folder=(depth == 1)),
             headers={"Depth": str(depth), "Content-Type": "application/xml; charset=utf-8"},
-            content=PROPFIND_XML,
+            content=PROPFIND_XML if diagnostics is None else PROPFIND_DIAGNOSTIC_XML,
         ) as response:
             if response.status_code != 207:
                 raise self._status_error(response)
             payload = await self._read_limited(
                 response, MAX_XML_BYTES, "Die Nextcloud-Verzeichnisantwort ist zu groß; einen kleineren Ordner wählen."
             )
-        infos = self._parse_multistatus(payload, requested=path, depth=depth)
+        infos = self._parse_multistatus(payload, requested=path, depth=depth, diagnostics=diagnostics)
         own = next((info for info in infos if info.path == path), None)
         if own is None:
             raise NextcloudError(
@@ -204,7 +223,9 @@ class NextcloudWebDAV:
                 return
         raise AccessDeniedError(ACCESS_DENIED_MESSAGE)
 
-    def _parse_multistatus(self, payload: bytes, *, requested: str, depth: int) -> list[FileInfo]:
+    def _parse_multistatus(
+        self, payload: bytes, *, requested: str, depth: int, diagnostics: dict | None = None
+    ) -> list[FileInfo]:
         try:
             xml = SafeET.fromstring(payload, forbid_dtd=True)
         except (DefusedXmlException, SafeET.ParseError, ValueError):
@@ -236,6 +257,8 @@ class NextcloudWebDAV:
             is_dir = resource_type is not None and resource_type.find(f"{DAV}collection") is not None
             size_text = (prop.findtext(f"{DAV}getcontentlength") or "").strip()
             seen.add(relative)
+            if diagnostics is not None:
+                diagnostics[relative] = self._share_metadata(prop)
             found.append(
                 FileInfo(
                     path=relative,
@@ -249,6 +272,19 @@ class NextcloudWebDAV:
                 )
             )
         return found
+
+    @staticmethod
+    def _share_metadata(prop: object) -> dict:
+        """Extract documented share/mount properties; None means 'not delivered by the server'."""
+        mount_type = prop.find(f"{NC}mount-type")  # type: ignore[attr-defined]
+        mount_root = prop.find(f"{NC}is-mount-root")  # type: ignore[attr-defined]
+        share = (prop.findtext(f"{OCS}share-permissions") or "").strip()  # type: ignore[attr-defined]
+        root_text = (mount_root.text or "").strip().lower() if mount_root is not None else ""
+        return {
+            "mount_type": (mount_type.text or "").strip() if mount_type is not None else None,
+            "mount_root": {"true": True, "1": True, "false": False, "0": False}.get(root_text),
+            "share_permissions": int(share) if share.isdigit() else None,
+        }
 
     def _check_denied_kind(self, relative: str, item: object) -> None:
         rule = self.policy.denied_rule_for(relative)
@@ -408,17 +444,138 @@ class NextcloudWebDAV:
         return result
 
     async def check_access(self) -> list[dict]:
-        """Read-only self-check of all allowed entries (used by ``--check-nextcloud``)."""
+        """Read-only self-check of all allowed entries (used by ``--check-nextcloud``).
+
+        Only PROPFIND is used. Each entry keeps the keys of 0.5.0 (``entry``, ``is_dir``,
+        ``permissions``, ``writable_in_nextcloud`` = raw letter finding on the entry itself) and
+        gets an additive, conservative interpretation, see :meth:`_diagnose`.
+        """
         report = []
         for rule in self.policy.allowed:
-            info = await self.info(rule.path)
-            letters = set(info.permissions or "")
-            report.append(
-                {
-                    "entry": rule.source,
-                    "is_dir": info.is_dir,
-                    "permissions": info.permissions,
-                    "writable_in_nextcloud": bool(letters & WRITE_PERMISSION_LETTERS),
-                }
-            )
+            try:
+                report.append(await self._diagnose(rule))
+            except LevuvoError as exc:
+                report.append(
+                    {
+                        "entry": rule.source,
+                        "is_dir": None,
+                        "permissions": None,
+                        "writable_in_nextcloud": None,
+                        "assessment": "error",
+                        "content_writable": None,
+                        "verified": False,
+                        "notes": [str(exc)],
+                    }
+                )
         return report
+
+    async def _diagnose(self, rule: PathRule) -> dict:
+        extras: dict[str, dict] = {}
+        own = next(
+            info for info in await self._propfind(rule.path, depth=0, diagnostics=extras) if info.path == rule.path
+        )
+        meta = extras.get(own.path, {"mount_type": None, "mount_root": None, "share_permissions": None})
+        letters = set(own.permissions or "")
+        notes: list[str] = []
+        definite_write: list[str] = []
+        open_points: list[str] = []
+        mount_root = meta["mount_root"]
+        share_bits = meta["share_permissions"]
+
+        if own.permissions is None:
+            open_points.append("Nextcloud liefert keine oc:permissions für diesen Eintrag.")
+        content_letters = letters & set("WCK")
+        if content_letters:
+            definite_write.append(f"Rechte {''.join(sorted(content_letters))} am Eintrag erlauben Schreiben/Anlegen.")
+        mount_letters = letters & MOUNT_POINT_LETTERS
+        if mount_letters:
+            if mount_root is True:
+                if "D" in mount_letters:
+                    notes.append(
+                        "D am Einhängepunkt einer Freigabe: Laut Nextcloud-WebDAV-Doku (nc:is-mount-root) kann ein "
+                        "Einhängepunkt nur aufgehoben (unshare), nicht gelöscht werden."
+                    )
+                undocumented = "".join(sorted(mount_letters - {"D"}))
+                if undocumented:
+                    open_points.append(
+                        f"{undocumented} am Einhängepunkt: vermutlich Umbenennen/Verschieben des eigenen Einhängepunkts; "
+                        "in der Nextcloud-Doku nicht beschrieben."
+                    )
+            elif mount_root is False:
+                definite_write.append(
+                    f"Rechte {''.join(sorted(mount_letters))} an einem Eintrag, der kein Einhängepunkt ist: "
+                    "Löschen/Umbenennen wirkt auf die Originaldaten."
+                )
+            else:
+                open_points.append(
+                    f"Rechte {''.join(sorted(mount_letters))} am Eintrag; Nextcloud liefert nc:is-mount-root nicht, "
+                    "daher unklar, ob nur der Einhängepunkt betroffen ist."
+                )
+
+        if share_bits is not None:
+            names = [name for bit, name in SHARE_PERMISSION_NAMES.items() if share_bits & bit]
+            notes.append(f"Freigaberechte laut ocs:share-permissions ({share_bits}): {', '.join(names) or 'keine'}.")
+            if share_bits & SHARE_WRITE_BITS:
+                definite_write.append("Die Freigabe erlaubt Ändern, Erstellen oder Löschen (ocs:share-permissions).")
+        elif meta["mount_type"] == "":
+            notes.append("Eintrag liegt im eigenen Speicher des technischen Kontos (kein empfangener Share).")
+        else:
+            open_points.append("Nextcloud liefert ocs:share-permissions nicht; Freigaberechte manuell prüfen.")
+
+        children_checked = 0
+        children_flagged: list[str] = []
+        children_truncated = False
+        if own.is_dir:
+            try:
+                children = [
+                    info
+                    for info in await self._propfind(own.path, depth=1, diagnostics=extras)
+                    if info.path != own.path
+                ]
+            except LimitExceededError:
+                children, children_truncated = [], True
+                open_points.append(f"Mehr als {MAX_DIRECTORY_ITEMS} Einträge: Inhalte nicht geprüft.")
+            children_checked = len(children)
+            for child in children:
+                child_letters = set(child.permissions or "") & WRITE_PERMISSION_LETTERS
+                child_bits = extras.get(child.path, {}).get("share_permissions")
+                if child_letters or (child_bits is not None and child_bits & SHARE_WRITE_BITS):
+                    children_flagged.append(child.path)
+            if children_flagged:
+                definite_write.append(
+                    f"{len(children_flagged)} unmittelbare(r) Eintrag/Einträge mit Schreib-/Lösch-/Umbenennrechten, "
+                    f"z. B. {children_flagged[0]}."
+                )
+            if not children and not children_truncated:
+                notes.append("Ordner ist leer; Inhaltsrechte nur aus Freigaberechten ableitbar.")
+            if any(child.is_dir for child in children):
+                open_points.append("Nur unmittelbare Einträge geprüft; tiefere Unterordner nicht.")
+            own_key = fold_key(own.path)
+            if any(deny.key.startswith(own_key + "/") for deny in self.policy.denied):
+                notes.append("Ausgeschlossene Einträge (NEXTCLOUD_DENIED_PATHS) wurden nicht geprüft.")
+
+        if definite_write:
+            assessment, content_writable, verified = "write_possible", True, True
+        elif share_bits is None and meta["mount_type"] != "":
+            assessment, content_writable, verified = "unverified", None, False
+        else:
+            content_writable = False
+            assessment = "read_only_content" if mount_letters else "read_only"
+            verified = not open_points
+        return {
+            "entry": rule.source,
+            "is_dir": own.is_dir,
+            "permissions": own.permissions,
+            "writable_in_nextcloud": bool(letters & WRITE_PERMISSION_LETTERS),
+            "assessment": assessment,
+            "content_writable": content_writable,
+            "verified": verified,
+            "mount_type": meta["mount_type"],
+            "mount_root": mount_root,
+            "share_permissions": share_bits,
+            "children_checked": children_checked,
+            "children_truncated": children_truncated,
+            "children_with_write_permissions": children_flagged[:10],
+            "notes": [*definite_write, *notes, *open_points],
+            "open_points": open_points,
+        }

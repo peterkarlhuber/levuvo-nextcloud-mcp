@@ -226,14 +226,27 @@ async def _check_nextcloud(settings: Settings) -> int:
     async with NextcloudWebDAV(settings) as client:
         report = await client.check_access()
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    writable = [entry["entry"] for entry in report if entry["writable_in_nextcloud"]]
+    failed = [entry for entry in report if entry["assessment"] == "error"]
+    writable = [entry["entry"] for entry in report if entry["assessment"] == "write_possible"]
+    unverified = [entry["entry"] for entry in report if entry["assessment"] != "error" and not entry["verified"]]
     if writable:
         print(
-            "WARNUNG: Das technische Konto hätte in Nextcloud Schreib-/Löschrechte auf: "
+            "WARNUNG: Das technische Konto hat in Nextcloud Schreib-, Lösch- oder Anlegerechte auf Inhalte von: "
             + ", ".join(writable)
             + ". Der MCP-Server schreibt nie, aber die Freigaben sollten schreibgeschützt sein (siehe SECURITY.md).",
             file=sys.stderr,
         )
+    if unverified:
+        print(
+            "HINWEIS: Rechte nicht abschließend verifiziert – manuelle Prüfung erforderlich für: "
+            + ", ".join(unverified)
+            + ". Details unter 'open_points' (siehe SECURITY.md).",
+            file=sys.stderr,
+        )
+    if failed:
+        for entry in failed:
+            print(f"Nextcloud-Prüfung fehlgeschlagen für {entry['entry']}: {entry['notes'][0]}", file=sys.stderr)
+        return 1
     return 0
 
 
