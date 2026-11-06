@@ -333,10 +333,10 @@ class NextcloudWebDAV:
         frontier: list[str] = []
         for rule in self.policy.allowed:
             metadata = await self.info(rule.path)
+            # Every released entry is itself a candidate - files *and* folders (fixed in 0.5.1).
+            consider(metadata)
             if metadata.is_dir:
                 frontier.append(metadata.path)
-            else:
-                consider(metadata)
         visited: set[str] = set()
         slots = asyncio.Semaphore(SEARCH_CONCURRENCY)
 
