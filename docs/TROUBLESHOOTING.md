@@ -1,6 +1,6 @@
-# Fehlerbehebung
+# Troubleshooting
 
-Erste Schritte bei jedem Problem:
+First steps for any problem:
 
 ```bash
 .venv/bin/levuvo-nextcloud-mcp --version
@@ -9,127 +9,142 @@ Erste Schritte bei jedem Problem:
 claude mcp list
 ```
 
-`--check-config` zeigt auch, welche Konfigurationsdatei geladen wurde (`config_file`).
+`--check-config` also shows which configuration file was loaded (`config_file`).
 
 ## Installation
 
 **`requires a different Python` / `Package requires Python >=3.11`**
-Das System-Python von macOS ist oft 3.9. Abhilfe: `brew install python@3.12` und das venv mit `python3.12 -m venv .venv` anlegen, oder `uv sync --extra dev` verwenden (uv besorgt ein passendes Python).
+The macOS system Python is often 3.9. Fix: `brew install python@3.12` and create the venv with `python3.12 -m venv .venv`, or use `uv sync --extra dev` (uv fetches a suitable Python).
 
-**`--require-hashes`-Fehler bei pip**
-Die Lockdatei passt nicht zur Plattform oder wurde verändert. Mit `uv sync --extra dev` installieren oder die Lockdatei neu exportieren lassen.
+**`--require-hashes` error with pip**
+The lockfile does not match the platform or has been modified. Install with `uv sync --extra dev` or have the lockfile re-exported.
 
-## Konfiguration
+## Configuration
 
-**`Konfigurationsfehler: NEXTCLOUD_URL muss … / NEXTCLOUD_USERNAME fehlt` obwohl `.env` ausgefüllt ist**
-Die Datei wurde nicht gefunden. Claude Code startet den Server nicht unbedingt im Projektordner. Abhilfe: `LEVUVO_MCP_ENV_FILE` mit absolutem Pfad setzen (siehe README, `claude mcp add --env …`). Ohne die Variable wird nur `.env` neben `pyproject.toml` einer Quellcode-Installation gelesen. Echte Umgebungsvariablen überschreiben Werte aus der Datei.
+**`Configuration error: NEXTCLOUD_URL must … / NEXTCLOUD_USERNAME is missing` although `.env` is filled in**
+The file was not found. Claude Code does not necessarily start the server in the project folder. Fix: set `LEVUVO_MCP_ENV_FILE` with an absolute path (see README, `claude mcp add --env …`). Without the variable, only `.env` next to `pyproject.toml` of a source installation is read. Real environment variables override values from the file.
 
-**`LEVUVO_MCP_ENV_FILE zeigt auf keine vorhandene Datei`**
-Pfad prüfen; `~` wird aufgelöst, relative Pfade beziehen sich auf das Startverzeichnis des Prozesses.
+**`LEVUVO_MCP_ENV_FILE does not point to an existing file`**
+Check the path; `~` is expanded, relative paths are relative to the process's working directory.
 
-**Warnung „Die Konfigurationsdatei … ist für andere Benutzer lesbar“**
+**Warning "The configuration file … is readable by other users"**
 `chmod 600 .env`.
 
-**`NEXTCLOUD_ALLOWED_PATHS ist leer`**
-Variable fehlt oder heißt anders. v0.5 kennt nur `NEXTCLOUD_ALLOWED_PATHS` und `NEXTCLOUD_DENIED_PATHS`; ältere Namen wie `NEXTCLOUD_ALLOWED_ROOTS` werden ignoriert.
+**`NEXTCLOUD_ALLOWED_PATHS is empty`**
+The variable is missing or has a different name. v0.5 only knows `NEXTCLOUD_ALLOWED_PATHS` and `NEXTCLOUD_DENIED_PATHS`; older names such as `NEXTCLOUD_ALLOWED_ROOTS` are ignored.
 
-**`NEXTCLOUD_APP_PASSWORD fehlt oder enthält noch einen Platzhalter`**
-Werte, die mit `EIGENES_`, `HIER_`, `CHANGE_ME` oder `<` beginnen, gelten als Platzhalter.
+**`NEXTCLOUD_APP_PASSWORD is missing or still contains a placeholder`**
+Values starting with `EIGENES_`, `HIER_`, `CHANGE_ME` or `<` are treated as placeholders.
 
-**`unbekanntes Präfix 'DIR:'` (oder `folder:`, `Projekt:` …)**
-Nur `dir:` und `file:` in Kleinbuchstaben sind gültig. Beginnt ein Ordnername mit `Wort:`, den Eintrag mit Präfix schreiben: `dir:Projekt:Alpha`.
+**`unknown prefix 'DIR:'` (or `folder:`, `Projekt:` …)**
+Only `dir:` and `file:` in lowercase are valid. If a folder name starts with `word:`, write the entry with a prefix: `dir:Projekt:Alpha`.
 
-**`… bezeichnen denselben Pfad`**
-Zwei Einträge unterscheiden sich nur in Schreibweise oder Präfix (`dir:Test`, `test`). Einen entfernen.
+**`… refer to the same path`**
+Two entries differ only in spelling or prefix (`dir:Test`, `test`). Remove one of them.
 
-**`NEXTCLOUD_DENIED_PATHS: '…' liegt unter keiner Freigabe`**
-Ein Ausschluss muss innerhalb einer Freigabe liegen, sonst ist er wirkungslos – meist ein Tippfehler im Pfad. Unter einer `file:`-Freigabe kann nichts ausgeschlossen werden.
+**`NEXTCLOUD_DENIED_PATHS: '…' does not lie below any share from NEXTCLOUD_ALLOWED_PATHS`**
+An exclusion must lie within a released entry, otherwise it has no effect – usually a typo in the path. Nothing can be excluded below a `file:` entry.
 
-**`Widersprüchliche Konfiguration: Die Freigabe … ist durch den Ausschluss … vollständig gesperrt`**
-Ein Ausschluss deckt eine ganze Freigabe ab (auch in anderer Schreibweise). Einen der beiden Einträge entfernen.
+**`Contradictory configuration: the share … is completely blocked by the exclusion …`**
+An exclusion covers an entire released entry (also in different spelling). Remove one of the two entries.
 
-**`… liegt unter der Einzeldatei …`**
-Unter einer `file:`-Freigabe kann es keine weiteren Einträge geben.
+**`… lies below the single file …`**
+There can be no further entries below a `file:` entry.
 
-**`Der Pfad enthält URL-kodierte Zeichen (z. B. %20)`**
-Pfade so eintragen, wie sie in Nextcloud angezeigt werden: `dir:05_Projekte/Projekt Alpha`, nicht `Projekt%20Alpha`. Das gilt in `.env` und bei Werkzeugaufrufen.
+**`The path contains URL-encoded characters (e.g. %20)`**
+Enter paths as they are displayed in Nextcloud: `dir:05_Projekte/Projekt Alpha`, not `Projekt%20Alpha`. This applies in `.env` and in tool calls.
 
 ## Nextcloud
 
-**`Nextcloud-Anmeldung fehlgeschlagen` (HTTP 401)**
-Loginname oder App-Passwort falsch, oder das App-Passwort wurde widerrufen. Neues App-Passwort unter *Einstellungen → Sicherheit → Geräte & Sitzungen* erzeugen. Wiederholte Fehlversuche können den Brute-Force-Schutz von Nextcloud auslösen.
+**`Nextcloud authentication failed` (HTTP 401)**
+Login name or app password wrong, or the app password has been revoked. Create a new app password under *Settings → Security → Devices & sessions* ("Einstellungen → Sicherheit → Geräte & Sitzungen"). Repeated failed attempts can trigger Nextcloud's brute-force protection.
 
-**`Nextcloud hat den Zugriff verweigert` (HTTP 403)**
-Das Konto hat auf diesen Pfad in Nextcloud keine Leserechte. Freigabe prüfen.
+**`Nextcloud denied access` (HTTP 403)**
+The account has no read rights on this path in Nextcloud. Check the share.
 
-**`Datei oder Ordner nicht gefunden` (HTTP 404)**
-Pfad aus Sicht von `agent.levuvo` prüfen: Empfangene Freigaben liegen normalerweise in dessen Wurzelverzeichnis (je nach Nextcloud-Einstellung auch in einem Unterordner) und können dort umbenannt worden sein. Groß-/Kleinschreibung zählt.
+**`File or folder not found` (HTTP 404)**
+Check the path from the perspective of `agent.levuvo`: received shares normally appear in its root folder (depending on the Nextcloud configuration also in a subfolder) and may have been renamed there. Case matters.
 
-**Leere Listen oder `Die WebDAV-Antwort enthält den angefragten Pfad nicht`**
-Die WebDAV-Benutzer-ID unterscheidet sich vom Loginnamen (häufig bei Anmeldung per E-Mail-Adresse). `NEXTCLOUD_USER_ID` setzen. Die ID steht in der Nextcloud-Weboberfläche unter *Dateien → Einstellungen → WebDAV* in der angezeigten Adresse (`…/remote.php/dav/files/<ID>/`).
+**404 for the test folder: `00_Agent Test` vs. `00_Agent_Test`**
+The name in `NEXTCLOUD_ALLOWED_PATHS` must match the folder name exactly as `agent.levuvo` sees it. The Levuvo test folder is `00_Agent Test` with a **space**; `dir:00_Agent_Test` (underscore) points to a non-existent path and results in a 404. Write the space literally, without quotes and without `%20`: `NEXTCLOUD_ALLOWED_PATHS=dir:00_Agent Test`.
 
-**`Freigabe-Typ widerspricht Nextcloud: '…' ist tatsächlich ein(e) Ordner/Datei`**
-`file:` steht vor einem Ordner oder `dir:` vor einer Datei – bei Freigaben oder Ausschlüssen. Präfix korrigieren.
+**Empty listings or `The WebDAV response does not contain the requested path`**
+The WebDAV user ID differs from the login name (common when logging in with an email address). Set `NEXTCLOUD_USER_ID`. The ID is shown in the Nextcloud web interface under *Files → Settings → WebDAV* ("Dateien → Einstellungen → WebDAV") in the displayed address (`…/remote.php/dav/files/<ID>/`).
 
-**`Nextcloud begrenzt die Anfragen derzeit (HTTP 429)`**
-Nextcloud drosselt. Warten (ggf. angegebene Sekunden) und Suchen mit kleinerem `max_depth` ausführen.
+**`Configured entry type contradicts Nextcloud: '…' is actually a folder/file`**
+`file:` is in front of a folder or `dir:` in front of a file – in released entries or exclusions. Correct the prefix.
 
-**`Zeitüberschreitung …` / `Verbindung zur Nextcloud fehlgeschlagen (Netzwerk oder TLS)`**
-Netzwerk prüfen. Proxy-Einstellungen der Umgebung werden bewusst ignoriert. Bei langsamen Antworten `NEXTCLOUD_TIMEOUT_SECONDS` erhöhen (max. 120).
+**`Nextcloud is currently rate-limiting requests (HTTP 429)`**
+Nextcloud is throttling. Wait (for the indicated number of seconds, if given) and run searches with a smaller `max_depth`.
 
-**`Nextcloud antwortet mit einer Weiterleitung`**
-`NEXTCLOUD_URL` stimmt nicht (z. B. `http` statt `https`, falscher Hostname). Weiterleitungen werden aus Sicherheitsgründen nicht verfolgt.
+**`Timeout while connecting to Nextcloud.` / `Connection to Nextcloud failed (network or TLS)`**
+Check the network. Proxy settings of the environment are deliberately ignored. For slow responses, increase `NEXTCLOUD_TIMEOUT_SECONDS` (max. 120).
 
-**`Die Nextcloud-Verzeichnisantwort ist zu groß` / `Zu viele Verzeichniseinträge`**
-Ordner mit mehr als 2000 Einträgen oder über 2 MB Antwort. Einen Unterordner freigeben bzw. auflisten.
+**`Nextcloud responded with a redirect`**
+`NEXTCLOUD_URL` is wrong (e.g. `http` instead of `https`, wrong hostname). Redirects are not followed for security reasons.
 
-**`--check-nextcloud` warnt vor Schreib-/Löschrechten**
-Die Freigabe an `agent.levuvo` ist nicht schreibgeschützt oder es ist ein eigener Ordner des Kontos. Freigabe auf „nur lesen“ ändern (siehe SECURITY.md).
+**`The Nextcloud directory response is too large` / `Too many directory entries`**
+Folder with more than 2000 entries or a response over 2 MB. Release or list a subfolder instead.
 
-## Dateien lesen
+**`--check-nextcloud` warns about write/delete rights (WARNING)**
+`WARNING: The technical account has write, delete or create permissions in Nextcloud on the contents of: …` – the share with `agent.levuvo` is not read-only, or it is a folder owned by the account itself. Change the share to read-only (see [SECURITY.md](../SECURITY.md#nextcloud-side-minimal-permissions)).
 
-**Umlaute in CSV sind falsch**
-Das Feld `encoding` in der Antwort zeigt die erkannte Kodierung. `cp1252` ist typisch für Excel-Exporte unter Windows und wird korrekt dekodiert. Sieht der Text trotzdem falsch aus, hat die Datei eine andere Kodierung (z. B. UTF-16 ohne BOM); die Datei in UTF-8 speichern.
+**`--check-nextcloud` prints a NOTE "not conclusively verified"**
+`NOTE: Permissions not conclusively verified - manual check required for: …` – this is not an error, but the automatic check could not settle everything (typically `N`/`V` on the mount point of a received share, or subfolders that were not checked). Read the `open_points` field of the entry in the JSON output and check manually as described in [SECURITY.md](../SECURITY.md#permissions-on-the-mount-point-and-on-content): in the web interface as `agent.levuvo`, no edit, delete, rename or move actions may be offered on the files, and the sharing account sees only "Read" ("Lesen") for the share with `agent.levuvo`.
 
-**`Die Datei scheint binär zu sein`**
-Die Dateiendung ist ein Textformat, der Inhalt aber nicht. Datei prüfen.
+**`Nextcloud check failed: …` / `Nextcloud check failed for …: …` (exit code 1)**
+The check could not run at all, or an entry could not be read (connection, login or WebDAV error). See the corresponding entries above.
 
-**PDF liefert keinen Text / Hinweis „evtl. gescanntes PDF“**
-Es gibt keine OCR. Das PDF vorher mit Texterkennung versehen. Verschlüsselte PDFs werden nicht gelesen. Ab Seite 41 wird nichts mehr verarbeitet.
+## Reading files
 
-**Text aus DOCX fehlt**
-Gelesen werden nur Absätze und Tabellen des Haupttexts – keine Kopf-/Fußzeilen, Textfelder oder Kommentare.
+**Umlauts in CSV are wrong**
+The `encoding` field in the response shows the detected encoding. `cp1252` is typical for Excel exports on Windows and is decoded correctly. If the text still looks wrong, the file has a different encoding (e.g. UTF-16 without BOM); save the file as UTF-8.
 
-**XLSX zeigt keine Formelergebnisse oder ist unvollständig**
-Es werden nur in der Datei gespeicherte Werte gelesen; Formeln werden nicht berechnet (Datei in Excel speichern, damit Werte vorhanden sind). Limits: 10 Blätter, 1000 Zeilen, 60 Spalten (`truncated: true`).
+**`The file appears to be binary`**
+The file extension is a text format, but the content is not. Check the file.
 
-**`Die Datei überschreitet das Downloadlimit`**
-`NEXTCLOUD_MAX_FILE_BYTES` erhöhen (max. 30000000) oder eine kleinere Datei verwenden.
+**PDF returns no text / note "possibly a scanned PDF (no OCR)"**
+There is no OCR. Run text recognition on the PDF beforehand. Encrypted PDFs are not read. Nothing from page 41 onwards is processed.
 
-**`Dateiformat … wird nicht unterstützt`**
-Unterstützt: Textformate (siehe README), `.pdf`, `.docx`, `.xlsx`. Alte Formate (`.doc`, `.xls`) vorher konvertieren.
+**Text from DOCX is missing**
+Only paragraphs and tables of the main body are read – no headers/footers, text boxes or comments.
 
-**`search_files` findet Inhalte nicht**
-Die Suche prüft nur Datei- und Ordnernamen. `complete: false` bedeutet, dass Tiefe, Trefferzahl oder die Grenze von 100 Ordnern erreicht wurde.
+**XLSX shows no formula results or is incomplete**
+Only values stored in the file are read; formulas are not evaluated (save the file in Excel so that values are present). Limits: 10 sheets, 1000 rows, 60 columns (`truncated: true`).
+
+**`The file exceeds the download limit`**
+Increase `NEXTCLOUD_MAX_FILE_BYTES` (max. 30000000) or use a smaller file.
+
+**`File format … is not supported`**
+Supported: text formats (see README), `.pdf`, `.docx`, `.xlsx`. Convert old formats (`.doc`, `.xls`) beforehand.
+
+**`search_files` does not find content**
+The search only checks file and folder names. `complete: false` means that the depth, the number of results or the limit of 100 folders was reached.
+
+**`search_files` did not find a released root folder (0.5.0)**
+In 0.5.0, the name search only looked inside the released folders, not at the released entries themselves: the queries "Agent" and "Agent Test" did not find the root folder `00_Agent Test` (live test of 2026-11-06, user report). Fixed in 0.5.1: the search also matches explicitly released root folders and files. Update (`git pull`, `uv sync --extra dev --frozen`), then close and reopen the Claude Code chat window.
 
 ## Claude Code
 
-**Server erscheint nicht oder „failed“ in `claude mcp list`**
-Absoluten Pfad zu `.venv/bin/levuvo-nextcloud-mcp` prüfen und den Befehl einmal direkt im Terminal mit `--check-config` ausführen. Alten Eintrag mit `claude mcp remove levuvo-nextcloud --scope user` entfernen und neu anlegen.
+**Server does not appear or shows "failed" in `claude mcp list`**
+Check the absolute path to `.venv/bin/levuvo-nextcloud-mcp` and run the command once directly in the terminal with `--check-config`. Remove the old entry with `claude mcp remove levuvo-nextcloud --scope user` and add it again.
 
-**Werkzeug meldet nur `Error executing tool …` ohne Details**
-Ein unerwarteter Fehler. Details stehen im stderr-Log des Servers (in Claude Code über die MCP-Logs bzw. durch direkten Start im Terminal).
+**Newly registered server does not show up in `/mcp` in VS Code**
+`claude mcp list` in the terminal shows "Connected", but the server is missing in `/mcp` in the Claude Code extension in VS Code. Fix: use a **Local** session (cloud/web sessions do not run on the Mac and cannot reach the local server), then **close and reopen the Claude Code chat window**. A chat window that is already open does not reload the MCP configuration. Confirmed in the live test of 2026-11-06 (user report).
+
+**Tool only reports `Error executing tool …` without details**
+An unexpected error. Details are in the server's stderr log (in Claude Code via the MCP logs, or by starting the server directly in the terminal).
 
 ## Remote
 
-**401 trotz Token**
-Header muss `Authorization: Bearer <Token>` lauten (genau ein Header, ohne zusätzliche Leerzeichen im Token). Proxy muss den Header weiterreichen.
+**401 despite token**
+The header must be `Authorization: Bearer <token>` (exactly one header, no extra whitespace in the token). The proxy must pass the header through.
 
 **421 `Invalid Host header`**
-Der Host der Anfrage passt nicht zu `MCP_PUBLIC_URL`. Proxy muss den ursprünglichen `Host` weiterreichen; `MCP_PUBLIC_URL` auf die tatsächliche Domain setzen.
+The host of the request does not match `MCP_PUBLIC_URL`. The proxy must pass the original `Host` through; set `MCP_PUBLIC_URL` to the actual domain.
 
 **403 `Invalid Origin header`**
-Browser-Anfragen (mit `Origin`-Header) sind nicht zugelassen.
+Browser requests (with an `Origin` header) are not permitted.
 
 **413 `Request body too large`**
-Anfragen über 128 KiB werden abgelehnt.
+Requests over 128 KiB are rejected.

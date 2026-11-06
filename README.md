@@ -1,56 +1,70 @@
 # Levuvo Nextcloud MCP
 
-Schreibgeschützter MCP-Server (Model Context Protocol) für die Hetzner Storage Share der Levuvo unter `https://storage.levuvo.com`. Er gibt einem KI-Client (z. B. Claude Code) Lesezugriff auf ausdrücklich freigegebene Dateien und Ordner – und auf nichts sonst.
+Read-only MCP server (Model Context Protocol) for Levuvo's Hetzner Storage Share at `https://storage.levuvo.com`. It gives an AI client (e.g. Claude Code) read access to explicitly released files and folders – and to nothing else.
 
-## Kurzüberblick und Status
+**Documentation:**
 
-- **Version:** 0.5.0 (Python 3.11+, MIT-Lizenz).
-- **Lokal (Standard):** Claude Code startet den Server über `stdio` auf dem Mac. Kein offener Port, kein Hosting.
-- **Remote (optional):** Streamable HTTP auf `127.0.0.1` hinter einem TLS-Reverse-Proxy, mit statischem Bearer-Token oder OAuth (externer Identity Provider nötig).
-- **Nur lesen:** Der Server sendet an Nextcloud ausschließlich `GET` und `PROPFIND`. Es gibt keine Werkzeuge zum Schreiben, Löschen, Verschieben oder Teilen.
+- **[docs/LOCAL_SETUP_MACOS.md](docs/LOCAL_SETUP_MACOS.md) – complete step-by-step setup on macOS** (Claude Code, VS Code, positive and negative test)
+- [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md) – reference for the four MCP tools
+- [SECURITY.md](SECURITY.md) – security model, Nextcloud permissions, checklist
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) – troubleshooting
+- [docs/REMOTE.md](docs/REMOTE.md) – optional remote operation
 
-> **Status:** Der lokale Betrieb ist implementiert und automatisiert getestet, wurde aber noch **nicht** gegen die echte Storage Share und nicht mit der echten Claude-Code-App geprüft. Ein öffentlich erreichbarer Remote-Endpunkt ist **nicht produktionsreif**, solange die Checkliste in [SECURITY.md](SECURITY.md) nicht abgearbeitet ist und Tests mit dem realen Client nicht bestanden sind. Zu Beginn nur einen Testordner ohne vertrauliche Daten freigeben.
+## Overview and status
 
-## Werkzeuge
+- **Version:** 0.5.1 (Python 3.11+, MIT license).
+- **Local (default):** Claude Code starts the server via `stdio` on the Mac. No open port, no hosting.
+- **Remote (optional):** Streamable HTTP on `127.0.0.1` behind a TLS reverse proxy, with a static bearer token or OAuth (external identity provider required).
+- **Read only:** The server sends only `GET` and `PROPFIND` to Nextcloud. There are no tools for writing, deleting, moving or sharing.
 
-| Werkzeug | Parameter (Grenzen) | Ergebnis |
+> **Status:** Local operation is implemented and covered by automated tests. **User-reported** live tests on 2026-11-06 (macOS, Claude Code in VS Code, the real Storage Share `storage.levuvo.com`): the first test passed 5/5; the second test made 43 MCP calls, 41 PASS and 2 functional search failures (the root folder `00_Agent Test` was not found by the queries "Agent" and "Agent Test"). These failures are fixed in 0.5.1. No access bypass was observed. These results were reported by the user; they are not tests run by the maintainers or by CI. Until the user re-tests live, the 0.5.1 fix is verified by automated tests only.
+>
+> A publicly reachable remote endpoint is **not production-ready** and has not been proven in practice: first work through the checklist in [SECURITY.md](SECURITY.md#checklist-before-any-public-operation) and pass tests with the real client. Start by releasing only a test folder without confidential data.
+
+## Tools
+
+Full reference: [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
+
+| Tool | Parameters (limits) | Result |
 |---|---|---|
-| `list_files` | `path` (leer = alle Freigaben), `limit` 1–250, Standard 100 | Freigegebene Einträge bzw. direkte Inhalte eines freigegebenen Ordners (`folder`, `items`, `truncated`) |
-| `get_file_info` | `path` | Metadaten ohne Inhalt: Typ, Größe, Content-Type, Änderungsdatum, ETag, Nextcloud-Rechte |
-| `search_files` | `query` 1–120 Zeichen, `max_depth` 0–6 (Standard 3), `max_results` 1–100 (Standard 25) | Treffer im **Datei- oder Ordnernamen** (keine Volltextsuche); `complete` zeigt, ob vollständig gesucht wurde |
-| `read_file` | `path`, `max_chars` 100–30000 (Standard 16000) | Text der Datei (`format`, `size_bytes`, `text`, `truncated`, bei Textdateien zusätzlich `encoding`) |
+| `list_files` | `path` (empty = all released entries), `limit` 1–250, default 100 | Released entries, or the immediate contents of a released folder (`folder`, `items`, `truncated`) |
+| `get_file_info` | `path` | Metadata without content: type, size, content type, modification date, ETag, Nextcloud permissions |
+| `search_files` | `query` 1–120 characters, `max_depth` 0–6 (default 3), `max_results` 1–100 (default 25) | Matches in the **file or folder name** (no full-text search); since 0.5.1 the name search also matches the explicitly released root folders and files themselves; `complete` shows whether the search was exhaustive |
+| `read_file` | `path`, `max_chars` 100–30000 (default 16000) | Text of the file (`format`, `size_bytes`, `text`, `truncated`, plus `encoding` for text files) |
 
-Alle vier Werkzeuge tragen die MCP-Annotationen `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true` und `openWorldHint=false` (eine fest konfigurierte Nextcloud, geschlossener Bereich). Die Annotationen beschreiben das Verhalten nur; erzwungen wird es im Code.
+All four tools carry the MCP annotations `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true` and `openWorldHint=false` (one fixed Nextcloud, closed scope). The annotations only describe the behavior; it is enforced in the code.
 
-Erwartbare Fehler (Pfad nicht freigegeben, Datei zu groß, Nextcloud nicht erreichbar …) kommen als MCP-Werkzeugfehler mit deutscher Meldung zurück. Bei unerwarteten Abstürzen erhält der Client nur eine allgemeine Meldung (`Error executing tool <name>`); Details landen im Server-Log auf stderr.
+Expected errors (path not released, file too large, Nextcloud unreachable …) are returned as MCP tool errors with a clear message. On unexpected crashes the client receives only a generic message (`Error executing tool <name>`); details go to the server log on stderr.
 
-**Unterstützte Formate in `read_file`:** Textformate (`.txt .md .markdown .csv .tsv .json .jsonl .yaml .yml .xml .html .htm .log .toml .ini .cfg .py .js .ts .css .sql .rst`), `.pdf`, `.docx`, `.xlsx`.
+**Formats supported by `read_file`:** text formats (`.txt .md .markdown .csv .tsv .json .jsonl .yaml .yml .xml .html .htm .log .toml .ini .cfg .py .js .ts .css .sql .rst`), `.pdf`, `.docx`, `.xlsx`.
 
-- Text: UTF-8 (mit oder ohne BOM), UTF-16 mit BOM, sonst Windows-1252 (`encoding: "cp1252"`, typisch für Excel-CSV). Binäre Inhalte werden abgelehnt.
-- PDF: höchstens 40 Seiten, keine OCR; bei gescannten PDFs folgt ein Hinweis. Verschlüsselte PDFs werden abgelehnt.
-- DOCX: Absätze und Tabellen des Haupttexts in Dokumentreihenfolge (keine Kopf-/Fußzeilen, Textfelder, Kommentare).
-- XLSX: höchstens 10 Blätter, 1000 Zeilen, 60 Spalten; nur gespeicherte Werte, Formeln werden nicht berechnet.
-- Office-Dateien werden vor dem Entpacken auf Zip-Bomben geprüft; beschädigte Dokumente ergeben eine klare Fehlermeldung.
-- Downloadlimit: `NEXTCLOUD_MAX_FILE_BYTES` (Standard 8 MB).
+- Text: UTF-8 (with or without BOM), UTF-16 with BOM, otherwise Windows-1252 (`encoding: "cp1252"`, typical for Excel CSV). Binary content is rejected.
+- PDF: at most 40 pages, no OCR; scanned PDFs produce a note. Encrypted PDFs are rejected.
+- DOCX: paragraphs and tables of the main body in document order (no headers/footers, text boxes, comments).
+- XLSX: at most 10 sheets, 1000 rows, 60 columns; stored values only, formulas are not evaluated.
+- Office files are checked for zip bombs before extraction; damaged documents produce a clear error message.
+- Download limit: `NEXTCLOUD_MAX_FILE_BYTES` (default 8 MB).
 
-## Schnellstart: macOS mit Claude Code
+## Quick start: macOS with Claude Code
 
-### 1. Voraussetzungen
+Short version. The complete walkthrough (cloning, app password, VS Code, positive and negative test) is in **[docs/LOCAL_SETUP_MACOS.md](docs/LOCAL_SETUP_MACOS.md)**.
 
-- **Python 3.11 oder neuer.** Das System-Python von macOS ist oft 3.9 und funktioniert nicht. Prüfen mit `python3 --version`; sonst `brew install python@3.12` oder [uv](https://docs.astral.sh/uv/) (`brew install uv`, uv lädt bei Bedarf selbst ein passendes Python).
+### 1. Prerequisites
+
+- **Python 3.11 or newer.** The macOS system Python is often 3.9 and does not work. Check with `python3 --version`; otherwise `brew install python@3.12` or [uv](https://docs.astral.sh/uv/) (`brew install uv`; uv downloads a suitable Python itself if needed).
 - Claude Code CLI (`claude`).
-- Ein eigenes technisches Nextcloud-Konto (z. B. `agent.levuvo`) mit App-Passwort und einem **schreibgeschützt** geteilten Testordner – Einrichtung siehe [SECURITY.md](SECURITY.md#nextcloud-seite-minimale-rechte).
+- A dedicated technical Nextcloud account (e.g. `agent.levuvo`) with an app password and a test folder shared with it **read-only** – setup see [SECURITY.md](SECURITY.md#nextcloud-side-minimal-permissions).
 
-### 2. Installieren (reproduzierbar über Lockfiles)
+### 2. Install (reproducible via lockfiles)
 
-Mit uv (empfohlen):
+With uv (recommended):
 
 ```bash
 cd levuvo-nextcloud-mcp
-uv sync --extra dev          # nutzt uv.lock, legt .venv an
+uv sync --extra dev          # uses uv.lock, creates .venv
 ```
 
-Alternativ mit pip und Hash-geprüfter Lockdatei:
+Alternatively with pip and the hash-checked lockfile:
 
 ```bash
 cd levuvo-nextcloud-mcp
@@ -59,34 +73,36 @@ python3.12 -m venv .venv
 .venv/bin/pip install --no-deps -e .
 ```
 
-`requirements.lock` enthält nur die Laufzeitabhängigkeiten (ohne Test-Werkzeuge).
+`requirements.lock` contains only the runtime dependencies (without test tools).
 
-### 3. Konfigurieren
+### 3. Configure
 
 ```bash
 cp .env.example .env
 chmod 600 .env
 ```
 
-In `.env` mindestens setzen:
+Set at least the following in `.env`:
 
 ```dotenv
 NEXTCLOUD_URL=https://storage.levuvo.com
 NEXTCLOUD_USERNAME=agent.levuvo
-NEXTCLOUD_APP_PASSWORD=<App-Passwort aus Nextcloud>
-NEXTCLOUD_ALLOWED_PATHS=dir:00_Agent_Test
+NEXTCLOUD_APP_PASSWORD=<app password from Nextcloud>
+NEXTCLOUD_ALLOWED_PATHS=dir:00_Agent Test
 ```
 
-Prüfen:
+The name must **exactly** match the folder name as `agent.levuvo` sees it in Nextcloud: the Levuvo test folder is `00_Agent Test` with a space, not `00_Agent_Test`. Write spaces literally – no quotes, no `%20`.
+
+Check:
 
 ```bash
-.venv/bin/levuvo-nextcloud-mcp --check-config      # offline, zeigt keine Geheimnisse
-.venv/bin/levuvo-nextcloud-mcp --check-nextcloud   # liest Metadaten der Freigaben aus Nextcloud
+.venv/bin/levuvo-nextcloud-mcp --check-config      # offline, shows no secrets
+.venv/bin/levuvo-nextcloud-mcp --check-nextcloud   # reads metadata of the released entries from Nextcloud
 ```
 
-### 4. In Claude Code eintragen
+### 4. Register in Claude Code
 
-Im Projektordner:
+In the project folder:
 
 ```bash
 claude mcp add --scope user --transport stdio levuvo-nextcloud \
@@ -95,182 +111,186 @@ claude mcp add --scope user --transport stdio levuvo-nextcloud \
 claude mcp list
 ```
 
-Ein älterer Eintrag (z. B. aus v0.4) muss vorher entfernt werden:
+An older entry (e.g. from v0.4) must be removed first:
 
 ```bash
 claude mcp remove levuvo-nextcloud --scope user
 ```
 
-Danach in Claude Code z. B.: „Liste mit levuvo-nextcloud die freigegebenen Ordner auf.“
+Then, in Claude Code, for example: "Use levuvo-nextcloud to list the released folders."
 
-`LEVUVO_MCP_ENV_FILE` ist nötig, weil Claude Code den Server nicht zwingend im Projektordner startet. Ohne die Variable sucht der Server `.env` nur neben `pyproject.toml` einer Quellcode-Installation.
+`LEVUVO_MCP_ENV_FILE` is needed because Claude Code does not necessarily start the server in the project folder. Without the variable, the server only looks for `.env` next to `pyproject.toml` of a source installation.
 
-## Berechtigungen
+## Permissions
 
-Zugriff steuern ausschließlich zwei Variablen mit identischer Syntax:
+Access is controlled exclusively by two variables with identical syntax:
 
-- `NEXTCLOUD_ALLOWED_PATHS` – Freigaben (Pflicht, mindestens ein Eintrag).
-- `NEXTCLOUD_DENIED_PATHS` – Ausnahmen innerhalb der Freigaben (optional).
+- `NEXTCLOUD_ALLOWED_PATHS` – released entries (required, at least one entry).
+- `NEXTCLOUD_DENIED_PATHS` – exceptions within the released entries (optional).
 
-Andere oder ältere Variablen (z. B. `NEXTCLOUD_ALLOWED_ROOTS`) kennt v0.5 nicht; sie werden ignoriert, und der Server startet dann mit „NEXTCLOUD_ALLOWED_PATHS ist leer“ nicht.
+Other or older variables (e.g. `NEXTCLOUD_ALLOWED_ROOTS`) are unknown to v0.5; they are ignored, and the server then refuses to start with "NEXTCLOUD_ALLOWED_PATHS is empty".
 
 ### Syntax
 
-Einträge werden mit Komma getrennt. Pfade sind relativ zum Dateibereich des technischen Kontos (so, wie `agent.levuvo` die Dateien in Nextcloud sieht), mit `/` getrennt.
+Entries are separated by commas. Paths are relative to the technical account's file area (as `agent.levuvo` sees the files in Nextcloud) and separated by `/`.
 
-| Form | Bedeutung |
+| Form | Meaning |
 |---|---|
-| `dir:Pfad` | Ordner mit allen Unterordnern. Ist der Pfad in Nextcloud eine Datei, gibt es zur Laufzeit einen Fehler. |
-| `file:Pfad` | Genau diese eine Datei. Ist der Pfad ein Ordner, gibt es zur Laufzeit einen Fehler. |
-| `Pfad` | Typ wird über Nextcloud erkannt. Für vertrauliche Bereiche besser `dir:`/`file:` angeben. |
+| `dir:path` | Folder including all subfolders. If the path is a file in Nextcloud, an error occurs at runtime. |
+| `file:path` | Exactly this one file. If the path is a folder, an error occurs at runtime. |
+| `path` | The type is detected via Nextcloud. For confidential areas, prefer specifying `dir:`/`file:`. |
 
 ```dotenv
-NEXTCLOUD_ALLOWED_PATHS=dir:01_Unternehmen/Strategie,file:02_Finanzen/Budget_2027.xlsx,dir:05_Projekte/SaaS-Produkte
+NEXTCLOUD_ALLOWED_PATHS=dir:00_Agent Test,dir:01_Unternehmen/Strategie,file:02_Finanzen/Budget_2027.xlsx,dir:05_Projekte/SaaS-Produkte
 NEXTCLOUD_DENIED_PATHS=dir:05_Projekte/SaaS-Produkte/Intern,file:01_Unternehmen/Strategie/Personalplanung.docx
 ```
 
-### Regeln
+Names must match the folder and file names exactly as `agent.levuvo` sees them; spaces are written literally (`dir:00_Agent Test`), without quotes and without `%20`.
 
-- **Pfadform:** kein führendes `/`, kein Backslash, keine `.`/`..`-Abschnitte, keine Steuer- oder unsichtbaren Formatzeichen. Ein abschließendes `/` wird entfernt. Pfade werden Unicode-NFC-normalisiert.
-- **Keine URL-Kodierung:** `%20` und ähnliche Sequenzen werden abgelehnt. Pfade unkodiert angeben (`Projekt Alpha`, nicht `Projekt%20Alpha`).
-- **Präfixe:** nur `dir:` und `file:`, klein geschrieben. `DIR:`, `folder:` usw. sind ein Startfehler. Beginnt ein Ordnername selbst mit `Wort:` (z. B. `Projekt:Alpha`), immer mit Präfix angeben: `dir:Projekt:Alpha`.
-- **Freigaben sind exakt:** Verglichen wird nach NFC-Normalisierung, Groß-/Kleinschreibung zählt. Die Normalisierung kann den Zugriff also nie erweitern.
-- **Ausschlüsse sind vorsichtig:** Sie greifen auch bei anderer Schreibweise (Groß-/Kleinschreibung, Unicode-Varianten, Punkte/Leerzeichen am Ende eines Abschnitts) und sperren **immer den ganzen Teilbaum**, unabhängig von `dir:`/`file:`. Ausschluss hat immer Vorrang. Ein Präfix bei Ausschlüssen wird geprüft, sobald der Eintrag in einer Ordnerliste auftaucht; widerspricht er dem echten Typ, gibt es einen Fehler.
-- **Gleiche Antwort:** Ein ausgeschlossener und ein nie freigegebener Pfad liefern dieselbe Meldung („Der Pfad ist nicht für den MCP-Agenten freigegeben.“).
-- **Startfehler** (Server startet nicht, Exit-Code 2):
-  - leere Freigabeliste,
-  - doppelte Einträge, auch in anderer Schreibweise (`dir:Test` und `test`),
-  - Ausschluss, der unter keiner Freigabe liegt (wirkungslos, meist Tippfehler),
-  - Freigabe, die von einem Ausschluss vollständig gesperrt wird,
-  - Einträge unterhalb einer `file:`-Freigabe,
-  - unbekannte Präfixe, ungültige Pfade.
+### Rules
 
-### Stolperfallen
+- **Path form:** no leading `/`, no backslash, no `.`/`..` segments, no control or invisible format characters. A trailing `/` is removed. Paths are Unicode NFC-normalized.
+- **No URL encoding:** `%20` and similar sequences are rejected. Specify paths unencoded (`Projekt Alpha`, not `Projekt%20Alpha`).
+- **Prefixes:** only `dir:` and `file:`, lowercase. `DIR:`, `folder:` etc. are a startup error. If a folder name itself starts with `word:` (e.g. `Projekt:Alpha`), always specify it with a prefix: `dir:Projekt:Alpha`.
+- **Released entries are exact:** comparison happens after NFC normalization; case matters. Normalisation can therefore never widen access.
+- **Exclusions are cautious:** they also apply to different spellings (case, Unicode variants, trailing dots/spaces in a segment) and **always block the whole subtree**, regardless of `dir:`/`file:`. Exclusion always takes precedence. A prefix on an exclusion is checked as soon as the entry appears in a folder listing; if it contradicts the real type, an error occurs.
+- **Same answer:** an excluded path and a never-released path produce the same message ("The path is not released for the MCP agent.").
+- **Startup errors** (server does not start, exit code 2):
+  - empty list of released entries,
+  - duplicate entries, also in different spelling (`dir:Test` and `test`),
+  - an exclusion that is not under any released entry (no effect, usually a typo),
+  - a released entry that is completely blocked by an exclusion,
+  - entries below a `file:` entry,
+  - unknown prefixes, invalid paths.
 
-- Breite Ordnerfreigaben geben auch **künftig angelegte** Dateien frei. Kleine, gezielte Freigaben sind sicherer als breite Freigaben mit vielen Ausnahmen.
-- Nextcloud-Freigabe und MCP-Freigabe sind zwei getrennte Ebenen: Der Pfad muss für `agent.levuvo` in Nextcloud lesbar **und** hier freigegeben sein.
-- Kommas in Datei- oder Ordnernamen lassen sich nicht angeben (Komma ist das Trennzeichen).
-- Geteilte Ordner erscheinen beim Empfänger normalerweise in dessen Wurzelverzeichnis, je nach Nextcloud-Einstellung auch in einem Unterordner. Maßgeblich ist der Pfad, den `agent.levuvo` in der Weboberfläche sieht.
+### Pitfalls
 
-## Konfigurationsreferenz
+- Broad folder releases also release files created **in the future**. Small, targeted releases are safer than broad releases with many exceptions.
+- The Nextcloud share and the MCP release are two separate layers: the path must be readable for `agent.levuvo` in Nextcloud **and** released here.
+- Commas in file or folder names cannot be specified (comma is the separator).
+- Shared folders normally appear in the recipient's root folder, or, depending on the Nextcloud configuration, in a subfolder. What counts is the path `agent.levuvo` sees in the web interface.
 
-Die Werte kommen aus echten Umgebungsvariablen oder einer `.env`-Datei. Echte Umgebungsvariablen haben Vorrang vor der Datei. Suchreihenfolge der Datei: `LEVUVO_MCP_ENV_FILE` (muss existieren, falls gesetzt) → `.env` neben `pyproject.toml` (nur in einer Quellcode-Installation) → keine Datei. Ist die Datei für Gruppe oder andere lesbar, warnt der Server (Empfehlung `chmod 600`).
+## Configuration reference
 
-| Variable | Pflicht | Standard | Bedeutung |
+Values come from real environment variables or a `.env` file. Real environment variables take precedence over the file. File lookup order: `LEVUVO_MCP_ENV_FILE` (must exist if set) → `.env` next to `pyproject.toml` (only in a source installation) → no file. If the file is readable by group or others, the server warns (recommendation: `chmod 600`).
+
+| Variable | Required | Default | Meaning |
 |---|---|---|---|
-| `NEXTCLOUD_URL` | ja | – | HTTPS-Adresse ohne Pfad und ohne Zugangsdaten, z. B. `https://storage.levuvo.com` |
-| `NEXTCLOUD_USERNAME` | ja | – | Loginname des technischen Kontos |
-| `NEXTCLOUD_APP_PASSWORD` | ja | – | App-Passwort (nicht das Login-Passwort); Platzhalter werden abgelehnt |
-| `NEXTCLOUD_USER_ID` | nein | = Loginname | WebDAV-Benutzer-ID, falls sie vom Loginnamen abweicht (z. B. Login per E-Mail-Adresse) |
-| `NEXTCLOUD_ALLOWED_PATHS` | ja | – | Freigaben, siehe [Berechtigungen](#berechtigungen) |
-| `NEXTCLOUD_DENIED_PATHS` | nein | leer | Ausnahmen |
-| `NEXTCLOUD_MAX_FILE_BYTES` | nein | `8000000` | Downloadlimit für `read_file`, 1–30000000 |
-| `NEXTCLOUD_TIMEOUT_SECONDS` | nein | `20` | Zeitlimit für Nextcloud-Anfragen, 1–120 |
-| `LEVUVO_MCP_ENV_FILE` | nein | – | Expliziter Pfad zur `.env` |
-| `MCP_PUBLIC_URL` | nur HTTP | `https://mcp.levuvo.com/mcp` | Öffentliche HTTPS-Adresse, muss auf `/mcp` enden, Port nur 443 |
-| `MCP_HTTP_PORT` | nur HTTP | `8765` | Lokaler Port (1024–65535), immer nur `127.0.0.1` |
-| `MCP_AUTH_MODE` | nur HTTP | `static` | `static` oder `oauth` |
-| `MCP_STATIC_TOKEN` | bei `static` | – | Zufälliges Token, 32–512 Zeichen, ohne Leerzeichen |
-| `MCP_OAUTH_ISSUER` | bei `oauth` | – | Issuer des Identity Providers (HTTPS, exakt wie im Token) |
-| `MCP_OAUTH_JWKS_URL` | bei `oauth` | – | JWKS-Adresse des Identity Providers (HTTPS) |
-| `MCP_OAUTH_AUDIENCE` | bei `oauth` | – | Erwarteter `aud`-Wert des Access Tokens |
-| `MCP_OAUTH_SCOPE` | bei `oauth` | `files:read` | Erforderlicher Scope |
+| `NEXTCLOUD_URL` | yes | – | HTTPS address without path and without credentials, e.g. `https://storage.levuvo.com` |
+| `NEXTCLOUD_USERNAME` | yes | – | Login name of the technical account |
+| `NEXTCLOUD_APP_PASSWORD` | yes | – | App password (not the login password); placeholders are rejected |
+| `NEXTCLOUD_USER_ID` | no | = login name | WebDAV user ID, if it differs from the login name (e.g. login by email address) |
+| `NEXTCLOUD_ALLOWED_PATHS` | yes | – | Released entries, see [Permissions](#permissions) |
+| `NEXTCLOUD_DENIED_PATHS` | no | empty | Exceptions |
+| `NEXTCLOUD_MAX_FILE_BYTES` | no | `8000000` | Download limit for `read_file`, 1–30000000 |
+| `NEXTCLOUD_TIMEOUT_SECONDS` | no | `20` | Timeout for Nextcloud requests, 1–120 |
+| `LEVUVO_MCP_ENV_FILE` | no | – | Explicit path to the `.env` |
+| `MCP_PUBLIC_URL` | HTTP only | `https://mcp.levuvo.com/mcp` | Public HTTPS address, must end in `/mcp`, port 443 only |
+| `MCP_HTTP_PORT` | HTTP only | `8765` | Local port (1024–65535), always `127.0.0.1` only |
+| `MCP_AUTH_MODE` | HTTP only | `static` | `static` or `oauth` |
+| `MCP_STATIC_TOKEN` | with `static` | – | Random token, 32–512 characters, no whitespace |
+| `MCP_OAUTH_ISSUER` | with `oauth` | – | Issuer of the identity provider (HTTPS, exactly as in the token) |
+| `MCP_OAUTH_JWKS_URL` | with `oauth` | – | JWKS address of the identity provider (HTTPS) |
+| `MCP_OAUTH_AUDIENCE` | with `oauth` | – | Expected `aud` value of the access token |
+| `MCP_OAUTH_SCOPE` | with `oauth` | `files:read` | Required scope |
 
-Die `MCP_*`-Variablen werden nur mit `--transport http` gelesen und geprüft.
+The `MCP_*` variables are only read and checked with `--transport http`.
 
-## Prüfbefehle
+## Check commands
 
-Aufruf als `levuvo-nextcloud-mcp` oder `python -m levuvo_nextcloud_mcp`:
+Invoke as `levuvo-nextcloud-mcp` or `python -m levuvo_nextcloud_mcp`:
 
-| Befehl | Wirkung |
+| Command | Effect |
 |---|---|
-| `--transport stdio` | Standard; für lokale Clients wie Claude Code |
-| `--transport http` | Streamable HTTP auf `127.0.0.1:MCP_HTTP_PORT` |
-| `--check-config` | Prüft die Konfiguration offline und gibt eine Zusammenfassung ohne Passwort/Token aus. Mit `--transport http` werden auch die Remote-Einstellungen geprüft. |
-| `--check-nextcloud` | Liest jeden freigegebenen Eintrag per `PROPFIND` (nur lesend), zeigt Typ und Nextcloud-Rechtebuchstaben und warnt, wenn das technische Konto dort schreiben oder löschen könnte (Buchstaben `W C K D N V`). Exit-Code 1 bei Fehlern. |
-| `--version` | Version ausgeben |
+| `--transport stdio` | Default; for local clients such as Claude Code |
+| `--transport http` | Streamable HTTP on `127.0.0.1:MCP_HTTP_PORT` |
+| `--check-config` | Checks the configuration offline and prints a summary without password/token. With `--transport http`, the remote settings are checked as well. |
+| `--check-nextcloud` | Reads each released entry via `PROPFIND` only (never writes), shows its type and Nextcloud permission letters, and distinguishes rights on a share's mount point from rights on its content (`nc:is-mount-root`, `ocs:share-permissions`, immediate children). Prints a WARNING for real write, delete or create rights on content, and a NOTE "not conclusively verified" when points remain open. Exit code 1 on errors. Details: [SECURITY.md](SECURITY.md#permissions-on-the-mount-point-and-on-content). |
+| `--version` | Print the version |
 
-Konfigurationsfehler beenden den Server mit Exit-Code 2 und der Meldung `Konfigurationsfehler: …` auf stderr.
+Configuration errors terminate the server with exit code 2 and the message `Configuration error: …` on stderr.
 
-## Tests und Qualität
+## Tests and quality
 
 ```bash
-uv run --extra dev pytest                 # oder: .venv/bin/pytest
-uv run --extra dev pytest --cov           # mit Abdeckung
+uv run --extra dev pytest                 # or: .venv/bin/pytest
+uv run --extra dev pytest --cov           # with coverage
 uv run --extra dev ruff check .
 uv run --extra dev ruff format --check .
 ```
 
-Die GitHub-Actions-Pipeline `.github/workflows/ci.yml` prüft `uv lock --check`, `ruff check` und `ruff format --check` und führt `pytest` unter Python 3.11, 3.12 und 3.13 (Ubuntu) sowie 3.12 auf macOS aus. Ein weiterer Job installiert aus `requirements-dev.lock` mit `--require-hashes` (der dokumentierte pip-Weg). Hinweis: `uv run` ohne `--extra dev` entfernt die Entwicklungswerkzeuge wieder aus `.venv`.
+The GitHub Actions pipeline `.github/workflows/ci.yml` checks `uv lock --check`, `ruff check` and `ruff format --check` and runs `pytest` on Python 3.11, 3.12 and 3.13 (Ubuntu) and 3.12 on macOS. Another job installs from `requirements-dev.lock` with `--require-hashes` (the documented pip route). Note: `uv run` without `--extra dev` removes the development tools from `.venv` again.
 
-**Lokaler Teststand v0.5.0 (2026-11-06):** 381 Tests bestanden, 0 fehlgeschlagen, unter Python 3.11 (Installation aus `requirements-dev.lock`), 3.12 und 3.13; Zeilen-/Zweigabdeckung 91 %. `ruff check` und `ruff format --check` ohne Befund.
+**Local test run for 0.5.1 (2026-11-06, Python 3.13, maintainer environment):** 441 tests passed, 0 failed; line/branch coverage 92 %. `ruff check`, `ruff format --check` and `uv lock --check` without findings. CI results for 3.11–3.13, macOS and the lockfile install are shown on the pull request.
 
-Die Tests laufen offline gegen nachgebildete WebDAV-Antworten. Ein Test gegen die echte Storage Share und mit realen Clients steht aus (siehe [Kompatibilität](#kompatibilität)).
+The automated tests run offline against simulated WebDAV responses. Tests against the real Storage Share with the real client have so far only been reported by the user (see [Overview and status](#overview-and-status) and [Compatibility](#compatibility)).
 
-## Remote-Betrieb
+## Remote operation
 
-Remote ist optional und für den lokalen Betrieb nicht nötig. Kurzfassung:
+Remote is optional and not needed for local operation. Summary:
 
-- Der Server bindet **nur `127.0.0.1`**. TLS und öffentliche Erreichbarkeit übernimmt ein Reverse-Proxy oder Tunnel.
-- Transport: Streamable HTTP, zustandslos, JSON-Antworten, Endpunkt `/mcp`.
-- Schutz: Host-Header-Allowlist (öffentlicher Host aus `MCP_PUBLIC_URL` und localhost), keine Browser-Origins, Request-Body max. 128 KiB, max. 32 gleichzeitige Verbindungen, kein Server-Header, kein Access-Log.
-- Authentifizierung: `MCP_AUTH_MODE=static` (fester Bearer-Token, schützt alle Routen) oder `oauth` (nur Resource Server; Login und Token-Ausgabe macht ein externer Identity Provider).
-- Die Hetzner Storage Share kann den Python-Dienst **nicht** hosten.
+- The server binds **only `127.0.0.1`**. TLS and public reachability are handled by a reverse proxy or tunnel.
+- Transport: Streamable HTTP, stateless, JSON responses, endpoint `/mcp`.
+- Protection: host header allowlist (public host from `MCP_PUBLIC_URL` and localhost), no browser origins, request body max. 128 KiB, max. 32 concurrent connections, no server header, no access log.
+- Authentication: `MCP_AUTH_MODE=static` (fixed bearer token, protects all routes) or `oauth` (resource server only; login and token issuance are done by an external identity provider).
+- The Hetzner Storage Share **cannot** host the Python service.
 
-Optionen ohne Pflicht-Hostingkosten (nur lokal, eigener Linux-Server, Tailscale Funnel, Router-Portfreigabe) und alle Details: [docs/REMOTE.md](docs/REMOTE.md). Beispielkonfigurationen: [deploy/](deploy/).
+Options without mandatory hosting costs (local only, own Linux server, Tailscale Funnel, router port forwarding) and all details: [docs/REMOTE.md](docs/REMOTE.md). Example configurations: [deploy/](deploy/).
 
-## Kompatibilität
+## Compatibility
 
-| Client | Technisch implementiert | Automatisiert getestet | Mit realem Client getestet | Nicht verifiziert |
+| Client | Technically implemented | Automatically tested | Tested with real client | Not verified |
 |---|---|---|---|---|
-| Claude Code lokal (`stdio`) | ja | ja, inkl. echtem stdio-Subprozess mit MCP-Handshake | nein | Betrieb gegen die echte Storage Share und mit der echten Claude-Code-App |
-| Claude Code CLI remote (`--transport http --header`) | ja (Modus `static`) | ja: lokaler Uvicorn-Server auf 127.0.0.1 mit echtem MCP-HTTP-Client, dazu Negativtests für Token, Host, Origin und Body-Limit | nein | Ende-zu-Ende gegen ein echtes Deployment |
-| Claude Web, benutzerdefinierter Connector | ja (Server-Seite) | Server-Seite ja | nein | Gesamtes Zusammenspiel. Braucht öffentliches HTTPS. Laut Claude-Hilfe bietet der Connector OAuth, „kein Login“ und feste Request-Header an; ob `static` damit funktioniert, ist ungeprüft. `oauth` braucht einen Identity Provider, der mit Claudes Ablauf zusammenspielt (automatische Registrierung oder eigener OAuth-Client). |
-| ChatGPT (Developer Mode / eigene MCP-Connectoren) | ja (Server-Seite, `oauth`) | Server-Seite ja | nein | Gesamtes Zusammenspiel. Braucht passenden Tarif (laut OpenAI Developer Mode für Plus, Pro, Business, Enterprise, Education im Web; Workspace-Richtlinien können ihn einschränken), öffentliches HTTPS und OAuth. OpenAI nennt als Authentifizierung nur OAuth, „keine Authentifizierung“ und gemischt – keine festen Header, `static` ist dort also nicht nutzbar. |
-| Claude Code im Web (Cloud-Sitzungen) | – | – | nein | Läuft in der Anthropic-Cloud und erreicht nur einen öffentlichen HTTPS-Endpunkt, keinen Server auf dem Mac. |
+| Claude Code local (`stdio`) | yes | yes, incl. a real stdio subprocess with MCP handshake | yes, user-reported (2026-11-06) | The 0.5.1 search fix with the real client (automated tests only so far) |
+| Claude Code CLI remote (`--transport http --header`) | yes (`static` mode) | yes: local Uvicorn server on 127.0.0.1 with a real MCP HTTP client, plus negative tests for token, host, origin and body limit | no | End-to-end against a real deployment |
+| Claude Web, custom connector | yes (server side) | server side yes | no | The overall interaction. Requires public HTTPS. According to Claude's help, the connector offers OAuth, "no login" and fixed request headers; whether `static` works with it is unchecked. `oauth` needs an identity provider that works with Claude's flow (automatic registration or a dedicated OAuth client). |
+| ChatGPT (Developer Mode / custom MCP connectors) | yes (server side, `oauth`) | server side yes | no | The overall interaction. Requires a suitable plan (according to OpenAI, Developer Mode is available for Plus, Pro, Business, Enterprise, Education on the web; workspace policies can restrict it), public HTTPS and OAuth. OpenAI lists only OAuth, "no authentication" and mixed as authentication – no fixed headers, so `static` cannot be used there. |
+| Claude Code on the web (cloud sessions) | – | – | no | Runs in the Anthropic cloud and can only reach a public HTTPS endpoint, not a server on the Mac. |
 
-Quellen (Stand 2026-11-06): [Claude – Custom Connectors mit Remote-MCP](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp), [OpenAI – ChatGPT Developer Mode](https://developers.openai.com/api/docs/guides/developer-mode), [OpenAI-Hilfe – Developer Mode und MCP-Connectoren](https://help.openai.com/en/articles/12584461-developer-mode-apps-and-full-mcp-connectors-in-chatgpt). Tarife und Oberflächen ändern sich; vor der Einrichtung aktuell nachlesen.
+Sources (as of 2026-11-06): [Claude – Custom connectors using remote MCP](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp), [OpenAI – ChatGPT Developer Mode](https://developers.openai.com/api/docs/guides/developer-mode), [OpenAI Help – Developer mode and MCP connectors](https://help.openai.com/en/articles/12584461-developer-mode-apps-and-full-mcp-connectors-in-chatgpt). Plans and interfaces change; check the current state before setting up.
 
-## Fehlerbehebung
+## Troubleshooting
 
-Häufige Fälle (Details in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)):
+Common cases (details in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)):
 
-- Python zu alt (`requires-python >=3.11`) → Homebrew `python@3.12` oder uv.
-- `.env` wird nicht gefunden → `LEVUVO_MCP_ENV_FILE` mit absolutem Pfad setzen.
-- 401 → Benutzername oder App-Passwort falsch; 403 → Freigaberechte des Kontos prüfen.
-- Leere Listen oder „Die WebDAV-Antwort enthält den angefragten Pfad nicht“ → `NEXTCLOUD_USER_ID` setzen.
-- „Freigabe-Typ widerspricht Nextcloud“ → `file:`/`dir:` korrigieren.
-- „URL-kodierte Zeichen“ → Pfad unkodiert eintragen.
-- Startfehler bei Ausschlüssen → Ausschluss muss unter einer Freigabe liegen und darf sie nicht ganz sperren.
-- Umlaute in CSV → Feld `encoding` beachten.
-- Gescanntes PDF → keine OCR; Text vorher erzeugen.
+- Python too old (`requires-python >=3.11`) → Homebrew `python@3.12` or uv.
+- `.env` not found → set `LEVUVO_MCP_ENV_FILE` with an absolute path.
+- 401 → username or app password wrong; 403 → check the account's share permissions.
+- 404 for the test folder → the folder name does not match exactly (`00_Agent Test` vs. `00_Agent_Test`).
+- Empty listings or "The WebDAV response does not contain the requested path" → set `NEXTCLOUD_USER_ID`.
+- "Configured entry type contradicts Nextcloud" → correct `file:`/`dir:`.
+- "URL-encoded characters" → enter the path unencoded.
+- Startup error with exclusions → an exclusion must lie under a released entry and must not block it completely.
+- Newly registered server does not show up in `/mcp` in VS Code → use a Local session and close and reopen the Claude Code chat window (confirmed in the live test).
+- Umlauts in CSV → check the `encoding` field.
+- Scanned PDF → no OCR; generate the text beforehand.
 
-## Projektstruktur
+## Project structure
 
 ```
 levuvo-nextcloud-mcp/
-├── .env.example                 # alle Variablen mit Platzhaltern
+├── .env.example                 # all variables with placeholders
 ├── pyproject.toml
 ├── uv.lock, requirements.lock, requirements-dev.lock
 ├── src/levuvo_nextcloud_mcp/
 │   ├── __main__.py              # python -m levuvo_nextcloud_mcp
-│   ├── server.py                # MCP-Werkzeuge, CLI, stdio/HTTP
-│   ├── policy.py                # Pfadnormalisierung, Allow/Deny-Logik
-│   ├── settings.py              # Nextcloud-Konfiguration, .env-Suche
-│   ├── webdav.py                # Nextcloud-Client (nur GET/PROPFIND)
-│   ├── extractors.py            # Text aus TXT/CSV/PDF/DOCX/XLSX
-│   ├── errors.py                # erwartete Fehler mit deutschen Meldungen
-│   ├── remote_settings.py       # Remote-Konfiguration
-│   ├── static_bearer.py         # statischer Bearer-Token
-│   └── jwt_tokens.py            # Prüfung von OAuth-JWT-Access-Tokens
+│   ├── server.py                # MCP tools, CLI, stdio/HTTP
+│   ├── policy.py                # path normalization, allow/deny logic
+│   ├── settings.py              # Nextcloud configuration, .env lookup
+│   ├── webdav.py                # Nextcloud client (GET/PROPFIND only)
+│   ├── extractors.py            # text from TXT/CSV/PDF/DOCX/XLSX
+│   ├── errors.py                # expected errors with user-facing messages
+│   ├── remote_settings.py       # remote configuration
+│   ├── static_bearer.py         # static bearer token
+│   └── jwt_tokens.py            # verification of OAuth JWT access tokens
 ├── tests/
-├── deploy/                      # Caddy- und systemd-Beispiele
-├── docs/REMOTE.md, docs/TROUBLESHOOTING.md
+├── deploy/                      # Caddy and systemd examples
+├── docs/LOCAL_SETUP_MACOS.md, docs/MCP_TOOLS.md, docs/REMOTE.md, docs/TROUBLESHOOTING.md
 ├── .github/workflows/ci.yml
 ├── SECURITY.md
 └── CHANGELOG.md
 ```
 
-## Lizenz
+## License
 
-MIT, siehe [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).

@@ -1,87 +1,125 @@
 # Changelog
 
+## 0.5.1 – 2026-11-06
+
+Patch release. Backward compatible: same four tools, same parameters, same environment variables, same read-only model (`GET`/`PROPFIND` only).
+
+### Background: live tests reported by the user on 2026-11-06
+
+These results were reported by the user (macOS, Claude Code in VS Code, real Storage Share `storage.levuvo.com`). The maintainers and CI did not run them:
+
+- First test: 5 of 5 checks passed.
+- Second test: 43 MCP calls, 41 passed, 2 functional search failures (see the search fix below). No access bypass was observed.
+- `--check-nextcloud` reported the released root folder `00_Agent Test` as `SGDN` and its file `test.txt` as `SG`, and therefore warned about write permissions. The web UI offered no edit or delete actions for the file.
+
+### Fixed
+
+- **`search_files` finds explicitly released root entries.** In 0.5.0 released folders from `NEXTCLOUD_ALLOWED_PATHS` were only used as starting points and never compared with the search term, so `search_files("Agent")` and `search_files("Agent Test")` did not find `00_Agent Test`. Root folders are now candidates like every other entry. The metadata was already loaded, so this adds no WebDAV request. Directly released files behave as before. Deduplication, `max_results`, `max_depth` and `complete` are unchanged.
+- **`--check-nextcloud` separates the share's mount point from its content.** In addition to `oc:permissions`, the check now requests `nc:mount-type`, `nc:is-mount-root` and `ocs:share-permissions` and inspects the immediate entries of each released folder (one depth-1 `PROPFIND`, never write attempts). `D` on a mount root is documented by Nextcloud as "unshare"; `N`/`V` on a mount root are undocumented and are reported as an open point ("not conclusively verified - manual check required"). Real write, delete or create permissions still produce a WARNING. Unclear cases produce a NOTE. WebDAV errors exit with code 1. See SECURITY.md.
+
+### Changed
+
+- `--check-nextcloud` output: the 0.5.0 keys `entry`, `is_dir`, `permissions` and `writable_in_nextcloud` are unchanged. New, additive keys: `assessment`, `content_writable`, `verified`, `mount_type`, `mount_root`, `share_permissions`, `children_checked`, `children_truncated`, `children_with_write_permissions`, `notes`, `open_points`.
+- **English throughout:** server instructions, tool titles and descriptions, parameter descriptions, error messages, CLI output, code comments, tests and documentation are now in English. Tool IDs, parameter names, environment variables and JSON keys are unchanged. Clients or scripts that matched German message texts must be adjusted.
+- More precise tool descriptions for MCP tool discovery (purpose, parameters, defaults, limits, result structure, errors) and new server instructions for the model.
+- Examples use the real test folder name `dir:00_Agent Test` (with a space).
+
+### Documentation
+
+- New `docs/LOCAL_SETUP_MACOS.md`: complete local setup on macOS (no SSH or Hetzner server needed for stdio; GitHub CLI; `uv sync --extra dev --frozen`; `.env`; app password; checks; `claude mcp add` and the `$(pwd)` pitfall; VS Code Local session and reopening the chat window; MCP-only positive/negative test; optional SSH appendix).
+- New `docs/MCP_TOOLS.md`: reference for the four tools.
+- SECURITY.md explains the difference between the MCP server's write ban and the Nextcloud account's broader permissions, and the semantics used by `--check-nextcloud`.
+- README status updated with the user-reported live tests. A public remote endpoint is still not production-ready.
+- The historical report `docs/ABSCHLUSSBERICHT_v0.5.0.md` is kept unchanged (German).
+
+### Tests
+
+- Regression tests for the search fix (root names with spaces, case-insensitive terms, multiple and overlapping roots, `file:` shares, subfolders, empty results, `max_results`, depth 0, denylist, nothing outside the policy, no duplicates, request count, real MCP tool call).
+- Tests for the permission diagnostics (share root `SGDN` with child `SG`, real write permissions on children, write share bits, empty folder, `file:` share, missing properties, own storage, truncated listings, denied children, WebDAV errors, CLI wording and exit codes).
+- Tool discovery tests (exactly four tools, compatible schemas, English texts, read-only annotations).
+
 ## 0.5.0 – 2026-11-06
 
 ### Breaking changes
 
-- Ausschlüsse in `NEXTCLOUD_DENIED_PATHS` mit Präfix (`dir:`, `file:`) werden jetzt wie Freigaben ausgewertet, statt als Teil des Pfads gelesen zu werden.
-- Strengere Prüfung beim Start: Duplikate (auch in anderer Schreibweise), wirkungslose Ausschlüsse, vollständig gesperrte Freigaben, Einträge unter `file:`-Freigaben und unbekannte Präfixe (`DIR:`, `folder:` …) sind Startfehler (Exit-Code 2).
-- URL-kodierte Pfade (z. B. `%20`) werden abgelehnt; Pfade unkodiert angeben.
-- `read_file` liefert bei Textdateien zusätzlich das Feld `encoding`.
-- `create_mcp(settings, …)` und `build_http_app(settings, remote, …)` erwarten jetzt ein `Settings`-Objekt.
+- Prefixed entries in `NEXTCLOUD_DENIED_PATHS` (`dir:`, `file:`) are now evaluated like allowed entries instead of being read as part of the path.
+- Stricter startup validation: duplicates (also in different spelling), ineffective exclusions, fully blocked shares, entries below `file:` shares and unknown prefixes (`DIR:`, `folder:` …) are startup errors (exit code 2).
+- URL-encoded paths (e.g. `%20`) are rejected; paths must be given unencoded.
+- `read_file` additionally returns the field `encoding` for text files.
+- `create_mcp(settings, …)` and `build_http_app(settings, remote, …)` now expect a `Settings` object.
 
-### Sicherheit
+### Security
 
-- SEC-01: Ausschlüsse verstehen dieselben Präfixe `dir:`/`file:` wie Freigaben (in v0.4 wurde `dir:X` als wörtlicher Pfad gelesen und war damit wirkungslos); unbekannte Präfixe sind Startfehler.
-- SEC-02: Zentrale Pfad-Policy (`policy.py`) mit Unicode-NFC-Normalisierung aller Pfade (Konfiguration, Anfrage, Nextcloud-`href`). Freigaben gelten exakt, die Normalisierung erweitert nie den Zugriff.
-- SEC-03: Ausschlüsse werden vorsichtig verglichen (NFKC, Groß-/Kleinschreibung, Punkte/Leerzeichen am Abschnittsende) und sperren immer den ganzen Teilbaum; Vorrang vor Freigaben.
-- SEC-04: SECURITY.md beschreibt die minimalen Rechte des technischen Nextcloud-Kontos (schreibgeschützte Freigaben, kein eigener Home-Ordner in der Allowlist, App-Passwort-Rotation, Quota ist keine Zugriffskontrolle); `--check-nextcloud` meldet Schreibrechte des Kontos.
-- SEC-05: Wirkungslose (außerhalb jeder Freigabe), doppelte oder widersprüchliche Einträge verhindern den Start (fail closed).
-- SEC-06: `PROPFIND`-Antworten werden gestreamt und bei 2 MB abgebrochen; DTDs/Entities in XML verboten.
-- SEC-07: JWKS-Schlüssel werden 5 min gecacht; ein unbekannter `kid` löst prozessweit höchstens eine Aktualisierung pro 60 s aus. Nur RS256, `typ` geprüft, ID-Tokens und Tokens über 8 KB abgelehnt.
-- SEC-08: OAuth: `AccessToken` übernimmt die echte Audience und `client_id`/`azp`; die SDK-Ressourcenprüfung greift, wenn `MCP_OAUTH_AUDIENCE` = `MCP_PUBLIC_URL`.
-- SEC-09: Erwartete Fehler werden nicht mehr als Absturz mit Traceback geloggt; Fehlermeldungen enthalten keine Zugangsdaten; `Settings`/`RemoteSettings` zeigen Geheimnisse nicht in `repr`.
-- Zusätzlich: Steuer-/Formatzeichen und URL-kodierte Sequenzen in Pfaden werden abgelehnt; `href`-Werte werden pro Abschnitt genau einmal dekodiert (ein kodierter `/` erzeugt keine neue Ebene), fremde Hosts/Benutzer verworfen; ausgeschlossene und nicht freigegebene Pfade liefern dieselbe Meldung; Warnung bei für andere lesbarer `.env`; statischer Token mit Groß-/Kleinschreibung-unabhängigem `Bearer`-Schema.
+- SEC-01: Exclusions understand the same prefixes `dir:`/`file:` as allowed entries (in v0.4 `dir:X` was read as a literal path and had no effect); unknown prefixes are startup errors.
+- SEC-02: Central path policy (`policy.py`) with Unicode NFC normalisation of all paths (configuration, request, Nextcloud `href`). Allowed entries match exactly; normalisation never widens access.
+- SEC-03: Exclusions are compared conservatively (NFKC, case, trailing dots/spaces per segment) and always block the whole subtree; they take precedence over allowed entries.
+- SEC-04: SECURITY.md describes the minimal permissions of the technical Nextcloud account (read-only shares, no own home folder in the allowlist, app password rotation, quota is no access control); `--check-nextcloud` reports write permissions of the account.
+- SEC-05: Ineffective (outside every share), duplicate or contradictory entries prevent startup (fail closed).
+- SEC-06: `PROPFIND` responses are streamed and aborted at 2 MB; DTDs/entities in XML are forbidden.
+- SEC-07: JWKS keys are cached for 5 min; an unknown `kid` triggers at most one refresh per 60 s process-wide. RS256 only, `typ` checked, ID tokens and tokens over 8 KB rejected.
+- SEC-08: OAuth: `AccessToken` carries the real audience and `client_id`/`azp`; the SDK resource check applies when `MCP_OAUTH_AUDIENCE` = `MCP_PUBLIC_URL`.
+- SEC-09: Expected errors are no longer logged as crashes with tracebacks; error messages contain no credentials; `Settings`/`RemoteSettings` hide secrets in `repr`.
+- Additionally: control/format characters and URL-encoded sequences in paths are rejected; `href` values are decoded exactly once per segment (an encoded `/` does not create a new level), foreign hosts/users are discarded; excluded and never-released paths return the same message; warning for a `.env` readable by others; static token with case-insensitive `Bearer` scheme.
 
 ### MCP
 
-- MCP-01: Erwartete Fehler (nicht freigegeben, nicht gefunden, Format, Limits, Nextcloud-Fehler) kommen als MCP-Werkzeugfehler (`ToolError`) mit deutscher Meldung beim Client an; unerwartete Abstürze nur mit allgemeiner Meldung.
-- MCP-02: Alle Werkzeuge mit `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`, `openWorldHint=false` und Titel.
-- MCP-03: Parametergrenzen im JSON-Schema (pydantic `Field`); Werkzeuge liefern zusätzlich strukturierte Ergebnisse.
-- MCP-04: Client-Kompatibilität ehrlich dokumentiert (README, docs/REMOTE.md), inkl. Korrektur: Claudes Connector-Oberfläche bietet laut Hilfe-Center feste Request-Header an (mit diesem Server nicht verifiziert).
-- MCP-05: Abhängigkeiten gepinnt (`mcp>=2.3,<2.4`) und über Lockfiles reproduzierbar; SDK-API gegen MCP SDK 2.3.0 getestet.
+- MCP-01: Expected errors (not released, not found, format, limits, Nextcloud errors) reach the client as MCP tool errors (`ToolError`) with a German message (English since 0.5.1); unexpected crashes only with a generic message.
+- MCP-02: All tools with `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`, `openWorldHint=false` and a title.
+- MCP-03: Parameter limits in the JSON schema (pydantic `Field`); tools additionally return structured results.
+- MCP-04: Client compatibility documented honestly (README, docs/REMOTE.md), including a correction: according to the help center, Claude's connector UI offers fixed request headers (not verified with this server).
+- MCP-05: Dependencies pinned (`mcp>=2.3,<2.4`) and reproducible via lockfiles; SDK API tested against MCP SDK 2.3.0.
 
-### WebDAV und Dokumente
+### WebDAV and documents
 
-- WD-01: Neue Variable `NEXTCLOUD_USER_ID`; fehlt der angefragte Pfad in der WebDAV-Antwort, erklärt die Fehlermeldung die mögliche Ursache.
-- WD-02: Ein gepoolter HTTPS-Client pro Prozess (Keep-Alive, max. 8 Verbindungen) statt pro Aufruf; Typprüfung freigegebener Einträge 5 min gecacht.
-- WD-03: Dateinamensuche als Breitensuche mit max. 4 parallelen Anfragen (gemessen: 61 Ordner bei 20 ms Latenz deutlich unter 0,9 s statt ≥ 1,2 s sequenziell).
-- WD-04: Textdateien: UTF-8 (mit/ohne BOM), UTF-16 mit BOM, Fallback Windows-1252 (Feld `encoding`); binäre Inhalte abgelehnt.
-- WD-05: Dokumentauswertung im Worker-Thread (max. 2 parallel), blockiert den Event-Loop nicht.
-- WD-06: DOCX mit Absätzen und Tabellen in Dokumentreihenfolge; klare Meldungen bei beschädigten DOCX/XLSX/PDF; Hinweis bei PDFs ohne Text (keine OCR).
-- Zusätzlich: Meldungen für 401, 403, 404, 429 (mit `Retry-After`), 3xx, 5xx und Zeitüberschreitung.
+- WD-01: New variable `NEXTCLOUD_USER_ID`; if the requested path is missing from the WebDAV response, the error message explains the likely cause.
+- WD-02: One pooled HTTPS client per process (keep-alive, max. 8 connections) instead of one per call; type check of released entries cached for 5 min.
+- WD-03: File name search as breadth-first search with at most 4 parallel requests (measured: 61 folders at 20 ms latency well below 0.9 s instead of ≥ 1.2 s sequentially).
+- WD-04: Text files: UTF-8 (with/without BOM), UTF-16 with BOM, fallback Windows-1252 (field `encoding`); binary content rejected.
+- WD-05: Document extraction in a worker thread (max. 2 in parallel), does not block the event loop.
+- WD-06: DOCX with paragraphs and tables in document order; clear messages for damaged DOCX/XLSX/PDF; hint for PDFs without text (no OCR).
+- Additionally: messages for 401, 403, 404, 429 (with `Retry-After`), 3xx, 5xx and timeouts.
 
-### Konfiguration
+### Configuration
 
-- CFG-01: Neue Variable `LEVUVO_MCP_ENV_FILE`; sonst `.env` neben `pyproject.toml` einer Quellcode-Installation, sonst nur Umgebungsvariablen. Umgebungsvariablen haben Vorrang.
-- CFG-02: Installationsanleitung für macOS mit Python-Versionsprüfung, uv und pip-Lockfile-Weg.
-- CFG-03: Präfixe nur klein geschrieben; abweichende Schreibweisen sind Startfehler statt stiller Pfadteil.
-- Neue CLI-Optionen `--check-config`, `--check-nextcloud` und `--version`; Konfigurationsfehler mit Exit-Code 2 ohne Traceback.
+- CFG-01: New variable `LEVUVO_MCP_ENV_FILE`; otherwise `.env` next to `pyproject.toml` of a source installation, otherwise environment variables only. Environment variables take precedence.
+- CFG-02: macOS installation guide with Python version check, uv and the pip lockfile route.
+- CFG-03: Prefixes lowercase only; other spellings are startup errors instead of silently becoming part of the path.
+- New CLI options `--check-config`, `--check-nextcloud` and `--version`; configuration errors exit with code 2 without a traceback.
 
-### Qualität
+### Quality
 
-- QA-01: Tests über einen echten MCP-Client (in-process, stdio-Subprozess und Streamable HTTP über Uvicorn) für alle vier Werkzeuge.
-- QA-02: Gezielte Sicherheits- und Grenzfalltests (Unicode NFC/NFD, Groß-/Kleinschreibung, Präfixe, Traversal, URL-Kodierung, Sonderzeichen, XML-Angriffe, HTTP-Fehler, Timeouts, Limits, Parallelität); unspezifische `pytest.raises(Exception)` ersetzt.
-- QA-03: GitHub-Actions-CI (Lockfile-Check, `ruff`, `pytest` mit Abdeckung unter Python 3.11–3.13 und macOS, pip-Installation aus Hash-Lockfile); `uv.lock`, `requirements.lock`, `requirements-dev.lock`.
-- Eine Versionsquelle (`__init__.py`, dynamisch in `pyproject.toml`), Test auf Konsistenz.
+- QA-01: Tests through a real MCP client (in-process, stdio subprocess and Streamable HTTP via Uvicorn) for all four tools.
+- QA-02: Targeted security and edge-case tests (Unicode NFC/NFD, case, prefixes, traversal, URL encoding, special characters, XML attacks, HTTP errors, timeouts, limits, concurrency); unspecific `pytest.raises(Exception)` replaced.
+- QA-03: GitHub Actions CI (lockfile check, `ruff`, `pytest` with coverage on Python 3.11–3.13 and macOS, pip installation from the hashed lockfile); `uv.lock`, `requirements.lock`, `requirements-dev.lock`.
+- A single version source (`__init__.py`, dynamic in `pyproject.toml`), with a consistency test.
 
 ### Remote
 
-- OPS-02: Gehärtete Beispiele für systemd und Caddy; Uvicorn ohne Server-Header und Access-Log, `limit_concurrency=32`.
+- OPS-02: Hardened examples for systemd and Caddy; Uvicorn without server header and access log, `limit_concurrency=32`.
 
-### Dokumentation
+### Documentation
 
-- README, SECURITY.md und `.env.example` überarbeitet; neu `docs/REMOTE.md` (Remote-Optionen ohne Pflicht-Hostingkosten) und `docs/TROUBLESHOOTING.md`; ehrliche Kompatibilitätstabelle.
+- README, SECURITY.md and `.env.example` revised; new `docs/REMOTE.md` (remote options without mandatory hosting costs) and `docs/TROUBLESHOOTING.md`; honest compatibility table.
 
 ## 0.4.0 – 2026-11-05
 
-- Einheitliche Konfigurationsnamen: `NEXTCLOUD_ALLOWED_PATHS` und `NEXTCLOUD_DENIED_PATHS`; kein Alias für alte Namen.
-- `NEXTCLOUD_ALLOWED_PATHS`: beliebige Mischung aus mehreren Dateien und Ordnern, komma-getrennt.
-- Explizite `file:`- (genau eine Datei) und `dir:`-Typangaben; unveränderte Pfade werden per WebDAV automatisch erkannt.
-- `NEXTCLOUD_DENIED_PATHS`: optionale, komma-getrennte Ausnahmen; ausgeschlossene Teilbäume; Deny vor Allow.
-- `list_files("")` listet erlaubte Dateien und Ordner mit echten Metadaten auf; einzeln freigegebene Dateien werden in `search_files` durch ihren Namen gefunden.
-- Ausgeschlossene Pfade werden vor der Netzwerkanfrage abgelehnt bzw. aus Verzeichnislisten und Suchergebnissen gefiltert.
-- Typkontrolle: `file:` darf nicht auf einen Ordner und `dir:` nicht auf eine Datei zeigen.
-- Lokale Offline-Tests, einschließlich neuer Berechtigungs-, Metadaten-, Listen- und Suchtests.
-- Kein zusätzliches Schreibwerkzeug, unveränderte lokale/Remote-Architektur aus v0.2.
+- Consistent configuration names: `NEXTCLOUD_ALLOWED_PATHS` and `NEXTCLOUD_DENIED_PATHS`; no alias for old names.
+- `NEXTCLOUD_ALLOWED_PATHS`: any mix of several files and folders, comma-separated.
+- Explicit `file:` (exactly one file) and `dir:` type prefixes; unprefixed paths are detected automatically via WebDAV.
+- `NEXTCLOUD_DENIED_PATHS`: optional, comma-separated exclusions; excluded subtrees; deny before allow.
+- `list_files("")` lists allowed files and folders with real metadata; individually released files are found by name in `search_files`.
+- Excluded paths are rejected before the network request or filtered from directory listings and search results.
+- Type check: `file:` must not point to a folder and `dir:` must not point to a file.
+- Local offline tests, including new permission, metadata, listing and search tests.
+- No additional write tool; local/remote architecture from v0.2 unchanged.
 
 ## 0.2.0 – 2026-11-05
 
-- Lokalen Claude-Code-Modus (`stdio`) beibehalten.
-- Remote-MCP über Streamable HTTP (`--transport http`) hinzugefügt.
-- Remote-HTTP bindet ausschließlich auf `127.0.0.1`.
-- Zwei Authentifizierungswege: fester Bearer-Token für klein begrenzte Tests; OAuth-Ressourcenserver mit externem RS256-JWT-IdP.
-- Host-/Origin-Allowlist, stateless HTTP, JSON-Antworten und Request-Body-Limit.
-- Caddy- und systemd-Beispiel sowie vollständige Einrichtungs- und Sicherheitshinweise.
-- Bestehende Dokumenten-/Ordnerfunktionen unverändert; nur vier Lesewerkzeuge.
-- 31 Offline-Tests bestanden; echte MCP-SDK- und Online-Integration steht noch aus.
+- Kept the local Claude Code mode (`stdio`).
+- Added remote MCP via Streamable HTTP (`--transport http`).
+- Remote HTTP binds to `127.0.0.1` only.
+- Two authentication options: fixed bearer token for small, limited tests; OAuth resource server with an external RS256 JWT IdP.
+- Host/Origin allowlist, stateless HTTP, JSON responses and request body limit.
+- Caddy and systemd examples plus complete setup and security notes.
+- Existing document/folder functions unchanged; only four read tools.
+- 31 offline tests passed; real MCP SDK and online integration still pending.

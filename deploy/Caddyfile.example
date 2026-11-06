@@ -1,12 +1,12 @@
-# Beispiel für Caddy 2 auf einem eigenen Linux-Server (nicht auf einem echten Server getestet).
+# Example for Caddy 2 on a Linux server of your own (not tested on a real server).
 #
-# mcp.levuvo.com ist eine Beispieldomain. Dieses Projekt richtet KEIN DNS ein:
-# Ein A/AAAA-Eintrag muss auf diesen Server zeigen, nicht auf die Storage Share.
-# Ports 80/443 müssen für die automatischen Zertifikate erreichbar sein.
-# Port 8765 bleibt geschlossen; der MCP-Dienst lauscht nur auf 127.0.0.1.
+# mcp.levuvo.com is an example domain. This project does NOT set up DNS:
+# an A/AAAA record must point to this server, not to the Storage Share.
+# Ports 80/443 must be reachable for the automatic certificates.
+# Port 8765 stays closed; the MCP service only listens on 127.0.0.1.
 
 mcp.levuvo.com {
-	# MCP-Anfragen sind klein; der Dienst selbst begrenzt auf 128 KiB.
+	# MCP requests are small; the service itself limits them to 128 KiB.
 	request_body {
 		max_size 256KB
 	}
@@ -18,13 +18,13 @@ mcp.levuvo.com {
 		Referrer-Policy "no-referrer"
 	}
 
-	# Host- und Authorization-Header werden unverändert weitergereicht
-	# (der Dienst prüft den Host gegen MCP_PUBLIC_URL).
+	# Host and Authorization headers are passed through unchanged
+	# (the service checks the host against MCP_PUBLIC_URL).
 	reverse_proxy 127.0.0.1:8765
 
-	# Access-Log nur bei Bedarf aktivieren. Caddy schwärzt Authorization-Header
-	# standardmäßig; die globale Option log_credentials NICHT setzen.
+	# Enable the access log only if needed. Caddy redacts Authorization headers
+	# by default; do NOT set the global option log_credentials.
 
-	# Rate-Limiting ist in Standard-Caddy nicht enthalten; optional über ein
-	# Plugin (z. B. caddy-ratelimit) oder eine Firewall ergänzen.
+	# Rate limiting is not included in standard Caddy; optionally add it via a
+	# plugin (e.g. caddy-ratelimit) or a firewall.
 }
