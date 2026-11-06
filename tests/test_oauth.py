@@ -1,4 +1,4 @@
-"""AP4/AP8: OAuth resource-server mode – JWT validation, JWKS abuse protection, metadata."""
+"""AP4/AP8: OAuth resource-server mode - JWT validation, JWKS abuse protection, metadata."""
 
 from __future__ import annotations
 

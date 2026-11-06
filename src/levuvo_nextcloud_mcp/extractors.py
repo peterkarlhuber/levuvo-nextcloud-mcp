@@ -56,11 +56,11 @@ def _check_zip_expansion(data: bytes) -> None:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             entries = archive.infolist()
     except (zipfile.BadZipFile, ValueError, OSError):
-        raise DocumentError("Die Office-Datei ist beschädigt oder kein gültiges Office-Dokument.") from None
+        raise DocumentError("The Office file is damaged or not a valid Office document.") from None
     if len(entries) > MAX_ZIP_ENTRIES or sum(item.file_size for item in entries) > MAX_ZIP_TOTAL:
-        raise LimitExceededError("Die Office-Datei ist nach dem Entpacken zu groß.")
+        raise LimitExceededError("The Office file is too large after decompression.")
     if any(item.file_size > MAX_ZIP_MEMBER for item in entries):
-        raise LimitExceededError("Ein Bestandteil der Office-Datei ist zu groß.")
+        raise LimitExceededError("A part of the Office file is too large.")
 
 
 def decode_text(data: bytes) -> tuple[str, str]:
@@ -71,11 +71,11 @@ def decode_text(data: bytes) -> tuple[str, str]:
         except UnicodeDecodeError:
             pass
     if b"\x00" in data[:8192]:
-        raise UnsupportedFormatError("Die Datei scheint binär zu sein und wird nicht als Text gelesen.")
+        raise UnsupportedFormatError("The file appears to be binary and is not read as text.")
     try:
         return data.decode("utf-8-sig"), "utf-8"
     except UnicodeDecodeError:
-        # Typical for CSV exports from Excel on Windows (Umlaute in cp1252).
+        # Typical for CSV exports from Excel on Windows (German umlauts in cp1252).
         return data.decode("cp1252", errors="replace"), "cp1252"
 
 
@@ -88,7 +88,7 @@ def _docx_text(data: bytes, max_chars: int) -> str:
     try:
         doc = Document(io.BytesIO(data))
     except Exception:  # python-docx raises many different parser errors
-        raise DocumentError("Das DOCX-Dokument ist beschädigt oder kann nicht gelesen werden.") from None
+        raise DocumentError("The DOCX document is damaged or cannot be read.") from None
     chunks: list[str] = []
     size = 0
 
@@ -123,7 +123,7 @@ def _xlsx_text(data: bytes, max_chars: int) -> tuple[str, bool]:
     try:
         workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     except Exception:
-        raise DocumentError("Die XLSX-Datei ist beschädigt oder kann nicht gelesen werden.") from None
+        raise DocumentError("The XLSX file is damaged or cannot be read.") from None
     chunks: list[str] = []
     size = 0
     partial = False
@@ -133,7 +133,7 @@ def _xlsx_text(data: bytes, max_chars: int) -> tuple[str, bool]:
         for sheet in workbook.worksheets[:MAX_SHEETS]:
             if (sheet.max_row or 0) > MAX_SHEET_ROWS or (sheet.max_column or 0) > MAX_SHEET_COLUMNS:
                 partial = True
-            chunks.append(f"[Tabellenblatt: {sheet.title}]")
+            chunks.append(f"[Sheet: {sheet.title}]")
             for row_index, row in enumerate(sheet.iter_rows(values_only=True), start=1):
                 if row_index > MAX_SHEET_ROWS or size > max_chars:
                     break
@@ -143,7 +143,7 @@ def _xlsx_text(data: bytes, max_chars: int) -> tuple[str, bool]:
             if size > max_chars:
                 break
     except Exception:
-        raise DocumentError("Die XLSX-Datei ist beschädigt oder kann nicht gelesen werden.") from None
+        raise DocumentError("The XLSX file is damaged or cannot be read.") from None
     finally:
         workbook.close()
     return "\n".join(chunks), partial
@@ -156,7 +156,7 @@ def _pdf_text(data: bytes, max_chars: int) -> tuple[str, bool]:
     try:
         reader = PdfReader(io.BytesIO(data), strict=False)
         if reader.is_encrypted:
-            raise DocumentError("Verschlüsselte PDF-Dateien können nicht gelesen werden.")
+            raise DocumentError("Encrypted PDF files cannot be read.")
         page_count = len(reader.pages)
         chunks: list[str] = []
         size = 0
@@ -166,19 +166,19 @@ def _pdf_text(data: bytes, max_chars: int) -> tuple[str, bool]:
                 break
             page_text = reader.pages[index].extract_text() or ""
             has_text = has_text or bool(page_text.strip())
-            chunk = f"[Seite {index + 1}]\n{page_text}"
+            chunk = f"[Page {index + 1}]\n{page_text}"
             chunks.append(chunk)
             size += len(chunk) + 2
     except DocumentError:
         raise
     except (PyPdfError, ValueError, KeyError, TypeError, OSError, RecursionError, AttributeError, IndexError):
-        raise DocumentError("Die PDF-Datei ist beschädigt oder kann nicht gelesen werden.") from None
+        raise DocumentError("The PDF file is damaged or cannot be read.") from None
     text = "\n\n".join(chunks)
     partial = page_count > MAX_PDF_PAGES
     if partial:
-        text += f"\n[Hinweis: Nur die ersten {MAX_PDF_PAGES} PDF-Seiten verarbeitet]"
+        text += f"\n[Note: Only the first {MAX_PDF_PAGES} PDF pages were processed]"
     if not has_text:
-        text += "\n[Hinweis: Kein extrahierbarer Text gefunden – evtl. gescanntes PDF (keine OCR).]"
+        text += "\n[Note: No extractable text found - possibly a scanned PDF (no OCR).]"
     return text, partial
 
 
@@ -187,8 +187,8 @@ def extract_text(path: str, data: bytes, *, max_chars: int) -> tuple[str, bool, 
     extension = PurePosixPath(path).suffix.lower()
     if extension not in SUPPORTED_EXTENSIONS:
         raise UnsupportedFormatError(
-            f"Dateiformat {extension or '(ohne Endung)'} wird nicht unterstützt. Unterstützt: "
-            "Textformate (z. B. .txt, .md, .csv, .json), .pdf, .docx, .xlsx."
+            f"File format {extension or '(no extension)'} is not supported. Supported: "
+            "text formats (e.g. .txt, .md, .csv, .json), .pdf, .docx, .xlsx."
         )
     partial = False
     encoding: str | None = None

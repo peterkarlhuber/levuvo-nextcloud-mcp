@@ -76,7 +76,7 @@ class JWTAccessTokenVerifier:
                 try:
                     self._refresh()
                 except (jwt.PyJWKClientError, OSError) as exc:
-                    logger.warning("JWKS-Abruf fehlgeschlagen: %s", type(exc).__name__)
+                    logger.warning("JWKS fetch failed: %s", type(exc).__name__)
             return self._keys.get(kid)
 
     # ------------------------------------------------------------------ tokens

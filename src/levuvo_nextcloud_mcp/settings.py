@@ -21,6 +21,8 @@ from .policy import AccessPolicy, PathRule, parse_rules
 logger = logging.getLogger(__name__)
 
 ENV_FILE_VARIABLE = "LEVUVO_MCP_ENV_FILE"
+# Placeholder prefixes of the example configuration (EIGENES_/HIER_ are the German
+# placeholders of earlier .env.example versions); a value starting with one is rejected.
 _PLACEHOLDER_PREFIXES = ("EIGENES_", "HIER_", "CHANGE_ME", "<")
 
 
@@ -53,21 +55,21 @@ class Settings:
             or parsed.fragment
         ):
             raise ConfigurationError(
-                "NEXTCLOUD_URL muss eine HTTPS-Adresse ohne Zugangsdaten sein, z. B. https://storage.levuvo.com."
+                "NEXTCLOUD_URL must be an HTTPS address without credentials, e.g. https://storage.levuvo.com."
             )
         if parsed.path not in ("", "/"):
-            raise ConfigurationError("NEXTCLOUD_URL darf keinen Pfad enthalten (nur z. B. https://storage.levuvo.com).")
+            raise ConfigurationError("NEXTCLOUD_URL must not contain a path (only e.g. https://storage.levuvo.com).")
         for name, value in (("NEXTCLOUD_USERNAME", self.username), ("NEXTCLOUD_USER_ID", self.user_id)):
             if value and ("/" in value or "\\" in value or value != value.strip() or _is_placeholder(value)):
-                raise ConfigurationError(f"{name} ist ungültig.")
+                raise ConfigurationError(f"{name} is invalid.")
         if not self.username:
-            raise ConfigurationError("NEXTCLOUD_USERNAME fehlt.")
+            raise ConfigurationError("NEXTCLOUD_USERNAME is missing.")
         if not self.app_password or _is_placeholder(self.app_password):
-            raise ConfigurationError("NEXTCLOUD_APP_PASSWORD fehlt oder enthält noch einen Platzhalter.")
+            raise ConfigurationError("NEXTCLOUD_APP_PASSWORD is missing or still contains a placeholder.")
         if not (1 <= self.max_file_bytes <= 30_000_000):
-            raise ConfigurationError("NEXTCLOUD_MAX_FILE_BYTES muss zwischen 1 und 30000000 liegen.")
+            raise ConfigurationError("NEXTCLOUD_MAX_FILE_BYTES must be between 1 and 30000000.")
         if not (1 <= self.timeout_seconds <= 120):
-            raise ConfigurationError("NEXTCLOUD_TIMEOUT_SECONDS muss zwischen 1 und 120 liegen.")
+            raise ConfigurationError("NEXTCLOUD_TIMEOUT_SECONDS must be between 1 and 120.")
         allowed = self._rules(self.allowed_paths, "NEXTCLOUD_ALLOWED_PATHS")
         denied = self._rules(self.denied_paths, "NEXTCLOUD_DENIED_PATHS")
         object.__setattr__(self, "policy", AccessPolicy(allowed, denied))
@@ -75,7 +77,7 @@ class Settings:
     @staticmethod
     def _rules(entries: tuple[str, ...], setting: str) -> tuple[PathRule, ...]:
         if isinstance(entries, str):  # defensive: a plain string would be split per character
-            raise ConfigurationError(f"{setting} muss als Liste übergeben werden.")
+            raise ConfigurationError(f"{setting} must be passed as a list.")
         return tuple(rule for entry in entries for rule in parse_rules(entry, setting))
 
     def require_allowed(self, path: object) -> str:
@@ -96,7 +98,7 @@ class Settings:
             try:
                 return kind(raw)
             except ValueError:
-                raise ConfigurationError(f"{name} muss eine Zahl sein (aktuell: '{raw}').") from None
+                raise ConfigurationError(f"{name} must be a number (current value: '{raw}').") from None
 
         raw_allowed = os.getenv("NEXTCLOUD_ALLOWED_PATHS", "")
         raw_denied = os.getenv("NEXTCLOUD_DENIED_PATHS", "")
@@ -128,7 +130,7 @@ def load_env_file() -> Path | None:
     if explicit:
         path = Path(explicit).expanduser()
         if not path.is_file():
-            raise ConfigurationError(f"{ENV_FILE_VARIABLE} zeigt auf keine vorhandene Datei: {path}")
+            raise ConfigurationError(f"{ENV_FILE_VARIABLE} does not point to an existing file: {path}")
     else:
         project_dir = Path(__file__).resolve().parents[2]
         path = project_dir / ".env"
@@ -146,6 +148,6 @@ def warn_if_permissive(path: Path) -> bool:
     except OSError:
         return False
     if os.name == "posix" and mode & (stat.S_IRWXG | stat.S_IRWXO):
-        logger.warning("Die Konfigurationsdatei %s ist für andere Benutzer lesbar. Empfehlung: chmod 600.", path)
+        logger.warning("The configuration file %s is readable by other users. Recommendation: chmod 600.", path)
         return True
     return False

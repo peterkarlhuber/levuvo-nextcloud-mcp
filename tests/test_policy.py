@@ -1,4 +1,4 @@
-"""AP1: central access policy – normalisation, allow/deny semantics, startup validation."""
+"""AP1: central access policy - normalisation, allow/deny semantics, startup validation."""
 
 from __future__ import annotations
 
@@ -199,17 +199,17 @@ def test_denied_and_unreleased_paths_share_one_message() -> None:
 @pytest.mark.parametrize(
     "allowed, denied, message",
     [
-        ("", "", "leer"),
-        ("dir:A,file:A", "", "denselben Pfad"),
-        ("dir:A,dir:a", "", "denselben Pfad"),
-        ("dir:Ä," + unicodedata.normalize("NFD", "dir:Ä"), "", "denselben Pfad"),
-        ("dir:A", "A/x,dir:A/X", "denselben Pfad"),
-        ("dir:A", "B/x", "unter keiner Freigabe"),
-        ("dir:A", "Ab/x", "unter keiner Freigabe"),
-        ("file:A/b.md", "A/b.md/c", "unter keiner Freigabe"),
-        ("dir:A,file:A/b.md", "A", "vollständig gesperrt"),
-        ("dir:A/B", "a", "vollständig gesperrt"),
-        ("file:A/b.md,file:A/b.md/c", "", "Einzeldatei"),
+        ("", "", "is empty"),
+        ("dir:A,file:A", "", "the same path"),
+        ("dir:A,dir:a", "", "the same path"),
+        ("dir:Ä," + unicodedata.normalize("NFD", "dir:Ä"), "", "the same path"),
+        ("dir:A", "A/x,dir:A/X", "the same path"),
+        ("dir:A", "B/x", "does not lie below any share"),
+        ("dir:A", "Ab/x", "does not lie below any share"),
+        ("file:A/b.md", "A/b.md/c", "does not lie below any share"),
+        ("dir:A,file:A/b.md", "A", "completely blocked"),
+        ("dir:A/B", "a", "completely blocked"),
+        ("file:A/b.md,file:A/b.md/c", "", "single file"),
     ],
 )
 def test_contradictory_or_ineffective_configuration_is_rejected(allowed: str, denied: str, message: str) -> None:

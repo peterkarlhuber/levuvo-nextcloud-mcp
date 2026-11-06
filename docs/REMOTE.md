@@ -1,122 +1,122 @@
-# Remote-Betrieb
+# Remote operation
 
-Remote ist optional. Der lokale Betrieb mit Claude Code (`stdio`) braucht nichts von dieser Seite.
+Remote is optional. Local operation with Claude Code (`stdio`) needs nothing from this page.
 
-> Ein öffentlich erreichbarer Endpunkt ist **nicht produktionsreif**, bevor die Checkliste in [SECURITY.md](../SECURITY.md#checkliste-vor-jedem-öffentlichen-betrieb) abgearbeitet ist und Tests mit dem realen Client bestanden sind. Keiner der unten beschriebenen Wege wurde bisher mit diesem Server praktisch erprobt.
+> A publicly reachable endpoint is **not production-ready** until the checklist in [SECURITY.md](../SECURITY.md#checklist-before-any-public-operation) has been worked through and tests with the real client have passed. None of the routes described below has been tried in practice with this server so far.
 
-## Was der Server im HTTP-Modus macht
+## What the server does in HTTP mode
 
 - Start: `levuvo-nextcloud-mcp --transport http`
-- Lauscht **nur auf `127.0.0.1:MCP_HTTP_PORT`** (Standard 8765). TLS und öffentliche Erreichbarkeit übernimmt ein Reverse-Proxy oder Tunnel.
-- Streamable HTTP, zustandslos, JSON-Antworten, Endpunkt `/mcp`.
-- Host-Header-Allowlist: Host aus `MCP_PUBLIC_URL` sowie `localhost`/`127.0.0.1`; sonst HTTP 421. Browser-Origins sind nicht zugelassen.
-- Request-Body max. 128 KiB, max. 32 gleichzeitige Verbindungen, kein Server-Header, kein Access-Log.
-- Authentifizierung über `MCP_AUTH_MODE`:
-  - `static`: fester Bearer-Token (`MCP_STATIC_TOKEN`, ≥ 32 Zeichen); jede Route ohne gültigen Token ergibt 401.
-  - `oauth`: Prüfung von RS256-JWT-Access-Tokens eines externen Identity Providers; Protected Resource Metadata unter `/.well-known/oauth-protected-resource/mcp`. Ein eigener Login/OAuth-Server ist **nicht** enthalten.
+- Listens **only on `127.0.0.1:MCP_HTTP_PORT`** (default 8765). TLS and public reachability are handled by a reverse proxy or tunnel.
+- Streamable HTTP, stateless, JSON responses, endpoint `/mcp`.
+- Host header allowlist: host from `MCP_PUBLIC_URL` plus `localhost`/`127.0.0.1`; otherwise HTTP 421. Browser origins are not permitted.
+- Request body max. 128 KiB, max. 32 concurrent connections, no server header, no access log.
+- Authentication via `MCP_AUTH_MODE`:
+  - `static`: fixed bearer token (`MCP_STATIC_TOKEN`, ≥ 32 characters); every route without a valid token returns 401.
+  - `oauth`: verification of RS256 JWT access tokens from an external identity provider; Protected Resource Metadata at `/.well-known/oauth-protected-resource/mcp`. A login/OAuth server of its own is **not** included.
 
-Die Hetzner Storage Share kann diesen Python-Dienst nicht hosten; er braucht einen eigenen Rechner.
+The Hetzner Storage Share cannot host this Python service; it needs a machine of its own.
 
-## Lokal testen (ohne Internet)
+## Testing locally (without internet)
 
 ```bash
-python3 -c 'import secrets; print(secrets.token_urlsafe(48))'   # Token erzeugen, in .env als MCP_STATIC_TOKEN
-.venv/bin/levuvo-nextcloud-mcp --transport http --check-config  # prüft auch die Remote-Einstellungen
+python3 -c 'import secrets; print(secrets.token_urlsafe(48))'   # generate a token, put it in .env as MCP_STATIC_TOKEN
+.venv/bin/levuvo-nextcloud-mcp --transport http --check-config  # also checks the remote settings
 .venv/bin/levuvo-nextcloud-mcp --transport http
 ```
 
-In einem zweiten Terminal:
+In a second terminal:
 
 ```bash
 curl -i http://127.0.0.1:8765/mcp
-# erwartet: 401 Unauthorized
+# expected: 401 Unauthorized
 
-read -rs TOKEN   # Token einfügen, landet nicht in der Shell-History
+read -rs TOKEN   # paste the token; it does not end up in the shell history
 curl -i http://127.0.0.1:8765/mcp \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
-# erwartet: JSON-Antwort mit serverInfo "Levuvo Nextcloud Read-Only"
+# expected: JSON response with serverInfo "Levuvo Nextcloud Read-Only"
 
-curl -i http://127.0.0.1:8765/mcp -H "Authorization: Bearer $TOKEN" -H "Host: fremd.example"
-# erwartet: 421 Invalid Host header
+curl -i http://127.0.0.1:8765/mcp -H "Authorization: Bearer $TOKEN" -H "Host: other.example"
+# expected: 421 Invalid Host header
 ```
 
-Alternativ den offiziellen MCP Inspector als Client verwenden.
+Alternatively, use the official MCP Inspector as the client.
 
-## Optionen ohne Pflicht-Hostingkosten
+## Options without mandatory hosting costs
 
-Vorgaben: keine verpflichtenden Hostingkosten, kein Cloudflare, kein Docker-Zwang, der lokale Mac hat Vorrang, und Remote darf keine Voraussetzung für den lokalen Betrieb sein.
+Constraints: no mandatory hosting costs, no Cloudflare, no Docker requirement, the local Mac has priority, and remote must not be a prerequisite for local operation.
 
-| Option | Kosten | Erreichbarkeit | Bewertung |
+| Option | Costs | Reachability | Assessment |
 |---|---|---|---|
-| 1. Nur lokal (`stdio`) | keine | nur Claude Code auf dem Mac | **Standard und empfohlen.** Kein offener Port. |
-| 2. Eigener, vorhandener Linux-Server | keine zusätzlichen, falls der Server ohnehin läuft | dauerhaft | Saubere Lösung für später. Beispiele in `deploy/`. |
-| 3. Tunnel ohne Cloudflare, z. B. Tailscale Funnel | kostenloser Tarif verfügbar | nur solange der Mac läuft und online ist | Externer Dienst im Datenpfad. Nicht getestet. |
-| 4. Router-Portfreigabe + DynDNS | keine | solange der Mac läuft | **Nicht empfohlen**: Heimnetz wird direkt angreifbar, Zertifikate und Updates liegen bei euch. |
+| 1. Local only (`stdio`) | none | only Claude Code on the Mac | **Default and recommended.** No open port. |
+| 2. Own existing Linux server | no additional costs if the server is running anyway | permanent | Clean solution for later. Examples in `deploy/`. |
+| 3. Tunnel without Cloudflare, e.g. Tailscale Funnel | free plan available | only while the Mac is running and online | External service in the data path. Not tested. |
+| 4. Router port forwarding + dynamic DNS | none | while the Mac is running | **Not recommended**: the home network becomes directly attackable; certificates and updates are your responsibility. |
 
-### Option 2: eigener Linux-Server (Caddy + systemd)
+### Option 2: own Linux server (Caddy + systemd)
 
-1. DNS-Eintrag (A/AAAA) für die gewünschte Domain auf den Server setzen. `mcp.levuvo.com` ist in den Beispielen nur ein Platzhalter; dieses Projekt richtet kein DNS ein.
-2. Projekt nach `/opt/levuvo-nextcloud-mcp`, venv wie im README anlegen.
-3. Konfiguration nach `/etc/levuvo-nextcloud-mcp/levuvo.env` (Besitzer Dienstbenutzer, `chmod 600`), `MCP_PUBLIC_URL` auf die echte Domain setzen.
-4. `deploy/levuvo-nextcloud-mcp.service.example` anpassen und installieren; `systemd-analyze security levuvo-nextcloud-mcp` prüfen.
-5. `deploy/Caddyfile.example` anpassen; Ports 80/443 öffnen, Port 8765 **nicht**.
-6. Von außen prüfen: ohne Token 401, fremder Host 421 (mit gültigem Token), Pfade außerhalb der Freigabe abgelehnt.
-7. Erst danach einen Client anbinden.
+1. Point a DNS record (A/AAAA) for the desired domain to the server. `mcp.levuvo.com` is only a placeholder in the examples; this project does not set up DNS.
+2. Put the project in `/opt/levuvo-nextcloud-mcp` and create the venv as described in the README.
+3. Put the configuration in `/etc/levuvo-nextcloud-mcp/levuvo.env` (owned by the service user, `chmod 600`) and set `MCP_PUBLIC_URL` to the real domain.
+4. Adapt and install `deploy/levuvo-nextcloud-mcp.service.example`; check `systemd-analyze security levuvo-nextcloud-mcp`.
+5. Adapt `deploy/Caddyfile.example`; open ports 80/443, but **not** port 8765.
+6. Check from outside: 401 without a token, 421 for a foreign host (with a valid token), paths outside the released entries rejected.
+7. Only then connect a client.
 
-### Option 3: Tailscale Funnel (nicht getestet)
+### Option 3: Tailscale Funnel (not tested)
 
-Funnel stellt einen lokalen Port unter `https://<gerät>.<tailnet>.ts.net` öffentlich bereit; TLS übernimmt Tailscale. Laut Tailscale ist Funnel in allen Tarifen verfügbar, setzt MagicDNS, HTTPS-Zertifikate und das `funnel`-Attribut in der Tailnet-Policy voraus und erlaubt nur die Ports 443, 8443 und 10000 ([Tailscale-Doku](https://tailscale.com/kb/1223/funnel)).
+Funnel exposes a local port publicly at `https://<device>.<tailnet>.ts.net`; Tailscale handles TLS. According to Tailscale, Funnel is available on all plans, requires MagicDNS, HTTPS certificates and the `funnel` attribute in the tailnet policy, and only allows ports 443, 8443 and 10000 ([Tailscale documentation](https://tailscale.com/kb/1223/funnel)).
 
-Skizze (Befehlssyntax je nach Tailscale-Version prüfen):
+Sketch (check the command syntax for your Tailscale version):
 
 ```bash
-# .env: MCP_PUBLIC_URL=https://<gerät>.<tailnet>.ts.net/mcp
+# .env: MCP_PUBLIC_URL=https://<device>.<tailnet>.ts.net/mcp
 levuvo-nextcloud-mcp --transport http
 tailscale funnel 8765
 ```
 
-Zu beachten: Der Mac muss laufen und darf nicht schlafen; Tailscale ist ein externer Dienst im Datenpfad; die Adresse ist öffentlich, der Token-Schutz also zwingend. Funnel nach dem Test wieder beenden.
+Keep in mind: the Mac must be running and must not sleep; Tailscale is an external service in the data path; the address is public, so token protection is mandatory. Stop Funnel again after the test.
 
-### Option 4: Router-Portfreigabe + DynDNS
+### Option 4: router port forwarding + dynamic DNS
 
-Technisch möglich (eigener TLS-Proxy auf dem Mac, Port 443 weiterleiten), aber nicht empfohlen. Wenn überhaupt, nur kurzfristig zum Testen und mit allen Punkten der Checkliste.
+Technically possible (own TLS proxy on the Mac, forward port 443), but not recommended. If at all, only briefly for testing and with all points of the checklist.
 
-## Clients anbinden
+## Connecting clients
 
-Alle folgenden Wege sind auf der Server-Seite implementiert, aber **nicht mit dem realen Client gegen ein echtes Deployment getestet**.
+All of the following routes are implemented on the server side, but **not tested with the real client against a real deployment**.
 
-### Claude Code CLI (Remote, `static`)
+### Claude Code CLI (remote, `static`)
 
-Von Claude Code technisch unterstützt:
+Technically supported by Claude Code:
 
 ```bash
 claude mcp add --transport http levuvo-nextcloud https://mcp.example/mcp \
   --header "Authorization: Bearer <MCP_STATIC_TOKEN>"
 ```
 
-Hinweis: Der Token steht danach in der Claude-Code-Konfiguration und ggf. in der Shell-History.
+Note: the token is then stored in the Claude Code configuration and possibly in the shell history.
 
-### Claude Web (benutzerdefinierter Connector)
+### Claude Web (custom connector)
 
-- Braucht einen öffentlichen HTTPS-Endpunkt; Claude verbindet sich aus der Anthropic-Cloud, nicht vom Mac aus.
-- Laut [Claude-Hilfe](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp) bietet der Connector-Dialog Anmeldung per OAuth oder „kein Login“, als OAuth-Client Claudes veröffentlichte Identität, automatische Registrierung oder einen eigenen Client, sowie feste Request-Header für API-Keys/Bearer-Tokens. Ob `static` damit mit diesem Server funktioniert, ist **nicht verifiziert**.
-- Für `oauth` muss der Identity Provider zu einer dieser Varianten passen und RS256-JWT-Access-Tokens mit passendem `aud` und Scope ausstellen. **Nicht verifiziert.**
-- Bei Team-/Enterprise-Tarifen fügen Admins Connectoren hinzu; ein statischer Token ist dann für alle Mitglieder derselbe.
+- Requires a public HTTPS endpoint; Claude connects from the Anthropic cloud, not from the Mac.
+- According to [Claude's help](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp), the connector dialog offers sign-in via OAuth or "no login"; as the OAuth client, Claude's published identity, automatic registration or a dedicated client; and fixed request headers for API keys/bearer tokens. Whether `static` works with this server that way is **not verified**.
+- For `oauth`, the identity provider must fit one of these variants and issue RS256 JWT access tokens with a matching `aud` and scope. **Not verified.**
+- On Team/Enterprise plans, admins add connectors; a static token is then the same for all members.
 
 ### ChatGPT
 
-- Eigene MCP-Connectoren gibt es im Developer Mode; laut [OpenAI](https://developers.openai.com/api/docs/guides/developer-mode) für Plus, Pro, Business, Enterprise und Education im Web. Workspace-Admins können ihn einschränken ([OpenAI-Hilfe](https://help.openai.com/en/articles/12584461-developer-mode-apps-and-full-mcp-connectors-in-chatgpt)).
-- Unterstützte Authentifizierung laut OpenAI: OAuth, keine Authentifizierung, gemischt. Feste Header sind nicht vorgesehen; `static` ist damit nicht nutzbar, `oauth` mit externem Identity Provider ist nötig.
-- Braucht öffentliches HTTPS. **Nicht verifiziert.**
+- Custom MCP connectors are available in Developer Mode; according to [OpenAI](https://developers.openai.com/api/docs/guides/developer-mode) for Plus, Pro, Business, Enterprise and Education on the web. Workspace admins can restrict it ([OpenAI Help](https://help.openai.com/en/articles/12584461-developer-mode-apps-and-full-mcp-connectors-in-chatgpt)).
+- Supported authentication according to OpenAI: OAuth, no authentication, mixed. Fixed headers are not provided for; `static` therefore cannot be used, and `oauth` with an external identity provider is required.
+- Requires public HTTPS. **Not verified.**
 
-### Claude Code im Web (Cloud-Sitzungen)
+### Claude Code on the web (cloud sessions)
 
-Läuft in der Anthropic-Cloud und erreicht nur öffentliche HTTPS-Endpunkte, keinen Server auf dem Mac. **Nicht verifiziert.**
+Runs in the Anthropic cloud and can only reach public HTTPS endpoints, not a server on the Mac. **Not verified.**
 
-## OAuth-Modus
+## OAuth mode
 
 ```dotenv
 MCP_AUTH_MODE=oauth
@@ -127,13 +127,13 @@ MCP_OAUTH_AUDIENCE=https://mcp.levuvo.com/mcp
 MCP_OAUTH_SCOPE=files:read
 ```
 
-Anforderungen an den Identity Provider:
+Requirements for the identity provider:
 
-- Access Tokens als **JWT, signiert mit RS256**, JWKS über HTTPS mit `kid`.
-- Claims `iss` (exakt wie `MCP_OAUTH_ISSUER`, inkl. eines eventuellen `/`), `aud` (enthält `MCP_OAUTH_AUDIENCE`), `sub`, `exp`, Scope in `scope` (Leerzeichen-getrennt oder Liste) oder `scp`.
-- Header `typ` fehlt oder ist `JWT`/`at+jwt`. ID-Tokens, opake Tokens, HS256-Tokens und Tokens über 8 KB werden abgelehnt.
-- Login, Einwilligung, PKCE und Client-Registrierung erledigt der Identity Provider.
+- Access tokens as **JWT, signed with RS256**, JWKS via HTTPS with `kid`.
+- Claims `iss` (exactly as `MCP_OAUTH_ISSUER`, including any trailing `/`), `aud` (contains `MCP_OAUTH_AUDIENCE`), `sub`, `exp`, scope in `scope` (space-separated or list) or `scp`.
+- Header `typ` is absent or `JWT`/`at+jwt`. ID tokens, opaque tokens, HS256 tokens and tokens over 8 KB are rejected.
+- Login, consent, PKCE and client registration are handled by the identity provider.
 
-Ist `MCP_OAUTH_AUDIENCE` gleich `MCP_PUBLIC_URL`, prüft das MCP-SDK zusätzlich die Ressourcenbindung (RFC 8707). Bei einer abweichenden, IdP-eigenen Audience prüft nur der JWT-Verifier das `aud`.
+If `MCP_OAUTH_AUDIENCE` equals `MCP_PUBLIC_URL`, the MCP SDK additionally checks the resource binding (RFC 8707). With a different, IdP-specific audience, only the JWT verifier checks `aud`.
 
-Wichtig: OAuth authentifiziert den Client am MCP-Server. In Nextcloud greifen trotzdem alle über dasselbe technische Konto zu.
+Important: OAuth authenticates the client to the MCP server. In Nextcloud, everyone still accesses via the same technical account.

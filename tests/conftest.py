@@ -36,12 +36,17 @@ class FakeNextcloud:
     host: str = HOST
     case_insensitive: bool = False
     permissions: str = "SG"
+    # Per-path overrides for oc:permissions; a value of None omits the property entirely.
+    permissions_by_path: dict[str, str | None] = field(default_factory=dict)
+    # Raw additional <prop> XML per path (e.g. nc:mount-type, nc:is-mount-root, ocs:share-permissions).
+    extra_props: dict[str, str] = field(default_factory=dict)
     delay: float = 0.0
     status_override: dict[str, int] = field(default_factory=dict)
     raw_override: dict[str, bytes] = field(default_factory=dict)
     headers_override: dict[str, dict[str, str]] = field(default_factory=dict)
     href_user: str | None = None
     requests: list[tuple[str, str]] = field(default_factory=list)
+    propfind_bodies: list[bytes] = field(default_factory=list)
     concurrent: int = 0
     max_concurrent: int = 0
 
@@ -73,6 +78,10 @@ class FakeNextcloud:
         encoded = "/".join(quote(segment, safe="") for segment in path.split("/"))
         return f"/remote.php/dav/files/{user}/{encoded}" + ("/" if path in self.folders else "")
 
+    def _permissions_xml(self, path: str) -> str:
+        value = self.permissions_by_path.get(path, self.permissions)
+        return "" if value is None else f"<oc:permissions>{value}</oc:permissions>"
+
     def multistatus(self, paths: list[str]) -> bytes:
         parts = []
         for path in paths:
@@ -86,11 +95,12 @@ class FakeNextcloud:
                 f"<d:getcontenttype>{'httpd/unix-directory' if is_dir else 'application/octet-stream'}</d:getcontenttype>"
                 f"<d:getlastmodified>{formatdate(0, usegmt=True)}</d:getlastmodified>"
                 f'<d:getetag>"etag-{abs(hash(path))}"</d:getetag>'
-                f"<oc:permissions>{self.permissions}</oc:permissions>"
+                f"{self._permissions_xml(path)}{self.extra_props.get(path, '')}"
                 "</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
             )
         return (
-            "<?xml version='1.0'?><d:multistatus xmlns:d='DAV:' xmlns:oc='http://owncloud.org/ns'>"
+            "<?xml version='1.0'?><d:multistatus xmlns:d='DAV:' xmlns:oc='http://owncloud.org/ns' "
+            "xmlns:nc='http://nextcloud.org/ns' xmlns:ocs='http://open-collaboration-services.org/ns'>"
             + "".join(parts)
             + "</d:multistatus>"
         ).encode()
@@ -105,6 +115,8 @@ class FakeNextcloud:
         # Nextcloud decodes once and normalises to NFC.
         relative = "/".join(unicodedata.normalize("NFC", unquote(segment)) for segment in segments)
         self.requests.append((request.method, relative))
+        if request.method == "PROPFIND":
+            self.propfind_bodies.append(request.content)
         self.concurrent += 1
         self.max_concurrent = max(self.max_concurrent, self.concurrent)
         try:

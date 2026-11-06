@@ -15,7 +15,7 @@ SRC = ROOT / "src" / "levuvo_nextcloud_mcp"
 
 def test_single_version_source() -> None:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == "0.5.0"
+    assert __version__ == "0.5.1"
     assert "version" in pyproject["project"]["dynamic"]
     assert pyproject["tool"]["hatch"]["version"]["path"] == "src/levuvo_nextcloud_mcp/__init__.py"
     for source in SRC.glob("*.py"):

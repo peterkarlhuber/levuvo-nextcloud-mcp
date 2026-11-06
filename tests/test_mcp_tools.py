@@ -83,15 +83,19 @@ async def test_all_four_tools_work(server) -> None:
 @pytest.mark.parametrize(
     "tool, args, message",
     [
-        ("read_file", {"path": "08_Privat/Tagebuch.txt"}, "nicht für den MCP-Agenten freigegeben"),
-        ("read_file", {"path": "05_Projekte/vertraulich/Kundenvertrag.pdf"}, "nicht für den MCP-Agenten freigegeben"),
-        ("get_file_info", {"path": "../etc/passwd"}, "'.' und '..'"),
+        ("read_file", {"path": "08_Privat/Tagebuch.txt"}, "The path is not released for the MCP agent."),
+        (
+            "read_file",
+            {"path": "05_Projekte/vertraulich/Kundenvertrag.pdf"},
+            "The path is not released for the MCP agent.",
+        ),
+        ("get_file_info", {"path": "../etc/passwd"}, "'.' and '..'"),
         ("get_file_info", {"path": "/05_Projekte"}, "relative"),
-        ("get_file_info", {"path": "05_Projekte%2FVertraulich"}, "URL-kodierte"),
-        ("read_file", {"path": "05_Projekte/Offen/fehlt.md"}, "nicht gefunden"),
-        ("read_file", {"path": "05_Projekte/Offen/Kunde A"}, "Ordner"),
-        ("read_file", {"path": "07_Ablage/x", "max_chars": 500}, "nicht für den MCP-Agenten freigegeben"),
-        ("list_files", {"path": "06_Marketing/CI.md"}, "Dies ist eine Datei"),
+        ("get_file_info", {"path": "05_Projekte%2FVertraulich"}, "URL-encoded"),
+        ("read_file", {"path": "05_Projekte/Offen/fehlt.md"}, "File or folder not found."),
+        ("read_file", {"path": "05_Projekte/Offen/Kunde A"}, "This is a folder. Use list_files."),
+        ("read_file", {"path": "07_Ablage/x", "max_chars": 500}, "The path is not released for the MCP agent."),
+        ("list_files", {"path": "06_Marketing/CI.md"}, "This is a file. Use get_file_info or read_file."),
     ],
 )
 async def test_expected_errors_reach_the_client_with_their_message(server, tool, args, message) -> None:
@@ -131,8 +135,8 @@ async def test_unsupported_format_and_limits_are_explained(make_settings) -> Non
     async with Client(server) as client:
         png = await client.call_tool("read_file", {"path": "05_Projekte/Offen/bild.png"})
         big = await client.call_tool("read_file", {"path": "05_Projekte/Offen/gross.txt"})
-    assert png.is_error and "nicht unterstützt" in text_of(png)
-    assert big.is_error and "Downloadlimit" in text_of(big)
+    assert png.is_error and "is not supported" in text_of(png)
+    assert big.is_error and "download limit" in text_of(big)
 
 
 async def test_nextcloud_auth_failure_is_reported_without_details(make_settings) -> None:
@@ -141,7 +145,7 @@ async def test_nextcloud_auth_failure_is_reported_without_details(make_settings)
     server = create_mcp(make_settings("dir:05_Projekte"), transport=fake.transport())
     async with Client(server) as client:
         result = await client.call_tool("list_files", {})
-    assert result.is_error and "App-Passwort prüfen" in text_of(result)
+    assert result.is_error and "check the username and app password" in text_of(result)
 
 
 async def test_unexpected_crash_returns_generic_message(server, monkeypatch) -> None:
