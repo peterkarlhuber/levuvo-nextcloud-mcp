@@ -1,4 +1,4 @@
-"""AP3: document extraction – formats, encodings, order, limits and damaged files."""
+"""AP3: document extraction - formats, encodings, order, limits and damaged files."""
 
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ def test_csv_from_excel_keeps_umlauts() -> None:
 
 
 def test_binary_content_with_text_extension_is_rejected() -> None:
-    with pytest.raises(UnsupportedFormatError, match="binär"):
+    with pytest.raises(UnsupportedFormatError, match="appears to be binary"):
         extract_text("x.txt", b"MZ\x00\x00\x00binary", max_chars=1000)
 
 
@@ -82,7 +82,7 @@ def test_binary_content_with_text_extension_is_rejected() -> None:
     "name", ["setup.exe", "bild.png", "archiv.zip", "alt.doc", "alt.xls", "DateiOhneEndung", "makro.xlsm"]
 )
 def test_unsupported_formats(name: str) -> None:
-    with pytest.raises(UnsupportedFormatError, match="nicht unterstützt"):
+    with pytest.raises(UnsupportedFormatError, match="is not supported"):
         extract_text(name, b"data", max_chars=1000)
 
 
@@ -118,7 +118,7 @@ def test_docx_output_limit() -> None:
 @pytest.mark.parametrize("data", [b"not a zip", b"PK\x03\x04broken", zipfile.ZipFile.__name__.encode()])
 def test_damaged_docx_and_xlsx(data: bytes) -> None:
     for name in ("a.docx", "a.xlsx"):
-        with pytest.raises(DocumentError, match="beschädigt"):
+        with pytest.raises(DocumentError, match="damaged"):
             extract_text(name, data, max_chars=1000)
 
 
@@ -135,11 +135,11 @@ def test_zip_bomb_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("word/document.xml", "0" * 200_000)
     monkeypatch.setattr(extractors, "MAX_ZIP_MEMBER", 100_000)
-    with pytest.raises(LimitExceededError, match="zu groß"):
+    with pytest.raises(LimitExceededError, match="too large"):
         extract_text("a.docx", buffer.getvalue(), max_chars=1000)
     monkeypatch.setattr(extractors, "MAX_ZIP_MEMBER", 10_000_000)
     monkeypatch.setattr(extractors, "MAX_ZIP_TOTAL", 100_000)
-    with pytest.raises(LimitExceededError, match="Entpacken"):
+    with pytest.raises(LimitExceededError, match="after decompression"):
         extract_text("a.xlsx", buffer.getvalue(), max_chars=1000)
 
 
@@ -159,7 +159,7 @@ def xlsx_bytes(sheets: dict[str, list[list[object]]]) -> bytes:
 def test_xlsx_values_and_formulas_are_not_evaluated() -> None:
     data = xlsx_bytes({"Budget": [["Kategorie", "Betrag"], ["Hosting", 100], ["Summe", "=SUM(B2:B2)"]]})
     text = extract_text("b.xlsx", data, max_chars=3000)[0]
-    assert "[Tabellenblatt: Budget]" in text and "Hosting | 100" in text
+    assert "[Sheet: Budget]" in text and "Hosting | 100" in text
     assert "Summe | " in text  # cached value is empty: formulas are never executed
 
 
@@ -172,19 +172,19 @@ def test_xlsx_sheet_limit_marks_partial(monkeypatch: pytest.MonkeyPatch) -> None
 # --------------------------------------------------------------------------- PDF
 def test_pdf_text_per_page() -> None:
     text, truncated, fmt, _ = extract_text("a.pdf", make_pdf(["Hallo Levuvo", "Seite zwei"]), max_chars=3000)
-    assert "[Seite 1]" in text and "Hallo Levuvo" in text and "Seite zwei" in text
+    assert "[Page 1]" in text and "Hallo Levuvo" in text and "Seite zwei" in text
     assert fmt == ".pdf" and truncated is False
 
 
 def test_pdf_page_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(extractors, "MAX_PDF_PAGES", 2)
     text, truncated, _, _ = extract_text("a.pdf", make_pdf(["eins", "zwei", "drei"]), max_chars=3000)
-    assert "drei" not in text and truncated is True and "ersten 2 PDF-Seiten" in text
+    assert "drei" not in text and truncated is True and "first 2 PDF pages" in text
 
 
 def test_pdf_without_text_gets_scan_hint() -> None:
     text = extract_text("scan.pdf", make_pdf([""]), max_chars=3000)[0]
-    assert "keine OCR" in text
+    assert "no OCR" in text
 
 
 @pytest.mark.parametrize("data", [b"%PDF-1.4 garbage", b"not a pdf", make_pdf(["ok"])[:60]])
@@ -200,5 +200,5 @@ def test_encrypted_pdf_is_rejected() -> None:
     writer.encrypt(user_password="pw", owner_password="pw2")
     buffer = io.BytesIO()
     writer.write(buffer)
-    with pytest.raises(DocumentError, match="Verschlüsselte"):
+    with pytest.raises(DocumentError, match="Encrypted PDF"):
         extract_text("a.pdf", buffer.getvalue(), max_chars=1000)

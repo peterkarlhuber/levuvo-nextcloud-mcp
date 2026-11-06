@@ -1,4 +1,4 @@
-"""AP8: Streamable HTTP app – static bearer auth, host validation, limits and a real E2E session."""
+"""AP8: Streamable HTTP app - static bearer auth, host validation, limits and a real E2E session."""
 
 from __future__ import annotations
 
@@ -177,5 +177,5 @@ async def test_end_to_end_streamable_http_with_mcp_client(app) -> None:
     assert {tool.name for tool in tools.tools} == {"list_files", "get_file_info", "search_files", "read_file"}
     assert "Kunde A" in [item["name"] for item in listing.structured_content["items"]]
     assert read.structured_content["text"].startswith("# Freigegeben")
-    assert denied.is_error and "nicht für den MCP-Agenten freigegeben" in denied.content[0].text
+    assert denied.is_error and "The path is not released for the MCP agent." in denied.content[0].text
     assert unauthorised.status_code == 401

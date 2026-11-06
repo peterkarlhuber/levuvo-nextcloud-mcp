@@ -121,16 +121,16 @@ async def test_untyped_file_entry_cannot_authorise_children(make_settings, nextc
     assert "07_Ablage/DateiOhneEndung/kind" not in nextcloud.paths_requested()
 
 
-@pytest.mark.parametrize("entry, actual", [("file:05_Projekte", "Ordner"), ("dir:06_Marketing/CI.md", "Datei")])
+@pytest.mark.parametrize("entry, actual", [("file:05_Projekte", "folder"), ("dir:06_Marketing/CI.md", "file")])
 async def test_prefix_type_mismatch_is_reported(make_settings, nextcloud, entry: str, actual: str) -> None:
     async with client(make_settings(entry), nextcloud) as dav:
-        with pytest.raises(NextcloudError, match=f"Freigabe-Typ.*{actual}"):
+        with pytest.raises(NextcloudError, match=f"entry type contradicts.*is actually a {actual}"):
             await dav.list_files("")
 
 
 async def test_deny_prefix_type_mismatch_is_reported(make_settings, nextcloud) -> None:
     async with client(make_settings("dir:05_Projekte", denied=("file:05_Projekte/Vertraulich",)), nextcloud) as dav:
-        with pytest.raises(NextcloudError, match="Freigabe-Typ"):
+        with pytest.raises(NextcloudError, match="entry type contradicts"):
             await dav.list_files("05_Projekte")
 
 
@@ -197,7 +197,7 @@ async def test_oversized_propfind_is_aborted_while_streaming(make_settings, monk
     fake.raw_override["A"] = b"<d:multistatus xmlns:d='DAV:'>" + b" " * 5000 + b"</d:multistatus>"
     monkeypatch.setattr(webdav_module, "MAX_XML_BYTES", 1000)
     async with client(make_settings("dir:A"), fake) as dav:
-        with pytest.raises(LimitExceededError, match="zu groß"):
+        with pytest.raises(LimitExceededError, match="too large"):
             await dav.info("A")
 
 
@@ -205,7 +205,7 @@ async def test_too_many_directory_entries(make_settings, monkeypatch) -> None:
     fake = FakeNextcloud(files={f"A/f{i}.txt": b"x" for i in range(30)})
     monkeypatch.setattr(webdav_module, "MAX_DIRECTORY_ITEMS", 10)
     async with client(make_settings("dir:A"), fake) as dav:
-        with pytest.raises(LimitExceededError, match="Zu viele"):
+        with pytest.raises(LimitExceededError, match="Too many"):
             await dav.list_files("A")
 
 
@@ -213,12 +213,12 @@ async def test_too_many_directory_entries(make_settings, monkeypatch) -> None:
 @pytest.mark.parametrize(
     "status, headers, error, message",
     [
-        (401, {}, NextcloudError, "Anmeldung fehlgeschlagen"),
-        (403, {}, NextcloudError, "Zugriff verweigert"),
-        (404, {}, NotFoundError, "nicht gefunden"),
+        (401, {}, NextcloudError, "authentication failed"),
+        (403, {}, NextcloudError, "denied access"),
+        (404, {}, NotFoundError, "not found"),
         (429, {"Retry-After": "30"}, NextcloudError, "HTTP 429.*30 s"),
-        (302, {"Location": "https://attacker.example/"}, NextcloudError, "Weiterleitung"),
-        (500, {}, NextcloudError, "nicht verfügbar"),
+        (302, {"Location": "https://attacker.example/"}, NextcloudError, "redirect"),
+        (500, {}, NextcloudError, "unavailable"),
         (418, {}, NextcloudError, "HTTP 418"),
     ],
 )
@@ -236,9 +236,9 @@ async def test_http_status_mapping(make_settings, status, headers, error, messag
 @pytest.mark.parametrize(
     "exc, message",
     [
-        (httpx.ConnectTimeout("t"), "Zeitüberschreitung"),
-        (httpx.ReadTimeout("t"), "Zeitüberschreitung"),
-        (httpx.ConnectError("x"), "Verbindung"),
+        (httpx.ConnectTimeout("t"), "Timeout"),
+        (httpx.ReadTimeout("t"), "Timeout"),
+        (httpx.ConnectError("x"), "Connection to Nextcloud failed"),
     ],
 )
 async def test_network_errors_are_mapped(make_settings, exc, message) -> None:
@@ -263,7 +263,7 @@ async def test_real_timeout_is_enforced(make_settings) -> None:
 
     async with NextcloudWebDAV(settings, transport=httpx.MockTransport(slow)) as dav:
         started = time.perf_counter()
-        with pytest.raises(NextcloudError, match="Zeitüberschreitung"):
+        with pytest.raises(NextcloudError, match="Timeout"):
             await dav.info("A")
     assert time.perf_counter() - started < 2.5
 
@@ -272,7 +272,7 @@ async def test_real_timeout_is_enforced(make_settings) -> None:
 async def test_download_limit_by_metadata_and_by_stream(make_settings) -> None:
     fake = FakeNextcloud(files={"A/big.txt": b"x" * 2000})
     async with client(make_settings("dir:A", max_file_bytes=1000), fake) as dav:
-        with pytest.raises(LimitExceededError, match="Downloadlimit"):
+        with pytest.raises(LimitExceededError, match="download limit"):
             await dav.read_file("A/big.txt")
     assert ("GET", "A/big.txt") not in fake.requests  # rejected from PROPFIND size already
 
@@ -280,7 +280,7 @@ async def test_download_limit_by_metadata_and_by_stream(make_settings) -> None:
     original = lying.multistatus
     lying.multistatus = lambda paths: original(paths).replace(b">2000<", b">10<")  # type: ignore[method-assign]
     async with client(make_settings("dir:A", max_file_bytes=1000), lying) as dav:
-        with pytest.raises(LimitExceededError, match="Downloadlimit"):
+        with pytest.raises(LimitExceededError, match="download limit"):
             await dav.read_file("A/big.txt")
     assert ("GET", "A/big.txt") in lying.requests
 
@@ -324,9 +324,9 @@ async def test_list_limit_bounds(make_settings, nextcloud, limit) -> None:
 
 async def test_list_on_file_and_read_on_folder_give_clear_errors(make_settings, nextcloud) -> None:
     async with client(make_settings("dir:05_Projekte/Offen"), nextcloud) as dav:
-        with pytest.raises(InvalidArgumentError, match="Datei"):
+        with pytest.raises(InvalidArgumentError, match="This is a file"):
             await dav.list_files("05_Projekte/Offen/Plan.md")
-        with pytest.raises(InvalidArgumentError, match="Ordner"):
+        with pytest.raises(InvalidArgumentError, match="This is a folder"):
             await dav.read_file("05_Projekte/Offen/Kunde A")
         with pytest.raises(NotFoundError):
             await dav.read_file("05_Projekte/Offen/gibt-es-nicht.md")

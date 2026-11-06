@@ -46,23 +46,23 @@ def test_user_id_overrides_webdav_user(clean_env: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize(
     "overrides, message",
     [
-        ({"NEXTCLOUD_ALLOWED_PATHS": ""}, "NEXTCLOUD_ALLOWED_PATHS ist leer"),
-        ({"NEXTCLOUD_ALLOWED_PATHS": " , "}, "NEXTCLOUD_ALLOWED_PATHS ist leer"),
+        ({"NEXTCLOUD_ALLOWED_PATHS": ""}, "NEXTCLOUD_ALLOWED_PATHS is empty"),
+        ({"NEXTCLOUD_ALLOWED_PATHS": " , "}, "NEXTCLOUD_ALLOWED_PATHS is empty"),
         ({"NEXTCLOUD_APP_PASSWORD": ""}, "NEXTCLOUD_APP_PASSWORD"),
-        ({"NEXTCLOUD_APP_PASSWORD": "EIGENES_NEXTCLOUD_APP_PASSWORT"}, "Platzhalter"),
+        ({"NEXTCLOUD_APP_PASSWORD": "EIGENES_NEXTCLOUD_APP_PASSWORT"}, "placeholder"),
         ({"NEXTCLOUD_USERNAME": ""}, "NEXTCLOUD_USERNAME"),
         ({"NEXTCLOUD_USER_ID": "a/b"}, "NEXTCLOUD_USER_ID"),
         ({"NEXTCLOUD_URL": "http://storage.levuvo.com"}, "HTTPS"),
         ({"NEXTCLOUD_URL": "https://user:pw@storage.levuvo.com"}, "HTTPS"),
-        ({"NEXTCLOUD_URL": "https://storage.levuvo.com/nextcloud"}, "keinen Pfad"),
+        ({"NEXTCLOUD_URL": "https://storage.levuvo.com/nextcloud"}, "must not contain a path"),
         ({"NEXTCLOUD_URL": ""}, "NEXTCLOUD_URL"),
-        ({"NEXTCLOUD_MAX_FILE_BYTES": "viel"}, "Zahl"),
-        ({"NEXTCLOUD_MAX_FILE_BYTES": "0"}, "zwischen"),
-        ({"NEXTCLOUD_MAX_FILE_BYTES": "40000000"}, "zwischen"),
-        ({"NEXTCLOUD_TIMEOUT_SECONDS": "500"}, "zwischen"),
-        ({"NEXTCLOUD_DENIED_PATHS": "DIR:01_Unternehmen/Privat"}, "unbekanntes Präfix"),
-        ({"NEXTCLOUD_DENIED_PATHS": "02_Finanzen"}, "unter keiner Freigabe"),
-        ({"NEXTCLOUD_ALLOWED_PATHS": "dir:/01_Unternehmen"}, "ungültiger Pfad"),
+        ({"NEXTCLOUD_MAX_FILE_BYTES": "lots"}, "must be a number"),
+        ({"NEXTCLOUD_MAX_FILE_BYTES": "0"}, "between"),
+        ({"NEXTCLOUD_MAX_FILE_BYTES": "40000000"}, "between"),
+        ({"NEXTCLOUD_TIMEOUT_SECONDS": "500"}, "between"),
+        ({"NEXTCLOUD_DENIED_PATHS": "DIR:01_Unternehmen/Privat"}, "unknown prefix"),
+        ({"NEXTCLOUD_DENIED_PATHS": "02_Finanzen"}, "does not lie below any share"),
+        ({"NEXTCLOUD_ALLOWED_PATHS": "dir:/01_Unternehmen"}, "invalid path"),
     ],
 )
 def test_invalid_configuration_fails_closed(clean_env: pytest.MonkeyPatch, overrides: dict, message: str) -> None:
@@ -74,7 +74,7 @@ def test_invalid_configuration_fails_closed(clean_env: pytest.MonkeyPatch, overr
 def test_removed_legacy_variable_is_not_read(clean_env: pytest.MonkeyPatch) -> None:
     base_env(clean_env, NEXTCLOUD_ALLOWED_PATHS="")
     clean_env.setenv("NEXTCLOUD_ALLOWED_" + "ROOTS", "dir:01_Unternehmen")
-    with pytest.raises(ConfigurationError, match="NEXTCLOUD_ALLOWED_PATHS ist leer"):
+    with pytest.raises(ConfigurationError, match="NEXTCLOUD_ALLOWED_PATHS is empty"):
         Settings.from_env()
     for source in SRC.glob("*.py"):
         assert "ALLOWED_" + "ROOTS" not in source.read_text(encoding="utf-8"), source

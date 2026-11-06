@@ -39,7 +39,7 @@ _PERCENT_ESCAPE = re.compile(r"%[0-9A-Fa-f]{2}")
 _PREFIX = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):")
 _KNOWN_PREFIXES = ("dir", "file")
 
-ACCESS_DENIED_MESSAGE = "Der Pfad ist nicht für den MCP-Agenten freigegeben."
+ACCESS_DENIED_MESSAGE = "The path is not released for the MCP agent."
 
 Kind = Literal["auto", "dir", "file"]
 
@@ -53,30 +53,30 @@ def normalize_path(path: object, *, allow_empty: bool = False) -> str:
     per-segment encoding).
     """
     if not isinstance(path, str):
-        raise InvalidArgumentError("Der Pfad muss eine Zeichenkette sein.")
+        raise InvalidArgumentError("The path must be a string.")
     if not path:
         if allow_empty:
             return ""
-        raise InvalidArgumentError("Ein Pfad ist erforderlich.")
+        raise InvalidArgumentError("A path is required.")
     if len(path) > MAX_PATH_LENGTH:
-        raise InvalidArgumentError(f"Der Pfad ist zu lang (maximal {MAX_PATH_LENGTH} Zeichen).")
+        raise InvalidArgumentError(f"The path is too long (maximum {MAX_PATH_LENGTH} characters).")
     path = unicodedata.normalize("NFC", path)
     if any(unicodedata.category(char) in _FORBIDDEN_CATEGORIES for char in path):
-        raise InvalidArgumentError("Der Pfad enthält Steuer- oder unsichtbare Formatzeichen.")
+        raise InvalidArgumentError("The path contains control or invisible formatting characters.")
     if path.startswith("/") or "\\" in path:
-        raise InvalidArgumentError("Nur relative Nextcloud-Pfade mit '/' als Trenner sind erlaubt.")
+        raise InvalidArgumentError("Only relative Nextcloud paths with '/' as separator are allowed.")
     if _PERCENT_ESCAPE.search(path):
         raise InvalidArgumentError(
-            "Der Pfad enthält URL-kodierte Zeichen (z. B. %20). Bitte den Pfad unkodiert angeben."
+            "The path contains URL-encoded characters (e.g. %20). Please specify the path without encoding."
         )
     if path.endswith("/"):
         path = path[:-1]
     parts = path.split("/")
     for part in parts:
         if part in ("", ".", ".."):
-            raise InvalidArgumentError("Leere Pfadabschnitte sowie '.' und '..' sind nicht erlaubt.")
+            raise InvalidArgumentError("Empty path segments as well as '.' and '..' are not allowed.")
         if len(part) > MAX_SEGMENT_LENGTH:
-            raise InvalidArgumentError(f"Ein Pfadabschnitt ist länger als {MAX_SEGMENT_LENGTH} Zeichen.")
+            raise InvalidArgumentError(f"A path segment is longer than {MAX_SEGMENT_LENGTH} characters.")
     return "/".join(parts)
 
 
@@ -105,7 +105,7 @@ class PathRule:
 
 
 def parse_rule(raw: str, setting: str) -> PathRule:
-    """Parse ``dir:Pfad``, ``file:Pfad`` or ``Pfad`` with identical rules for both settings."""
+    """Parse ``dir:path``, ``file:path`` or ``path`` with identical rules for both settings."""
     value = raw.strip()
     kind: Kind = "auto"
     match = _PREFIX.match(value)
@@ -116,19 +116,19 @@ def parse_rule(raw: str, setting: str) -> PathRule:
             value = value[len(prefix) + 1 :]
             inner = _PREFIX.match(value)
             if inner and inner.group(1).lower() in _KNOWN_PREFIXES:
-                raise ConfigurationError(f"{setting}: doppeltes Präfix in '{raw}'.")
+                raise ConfigurationError(f"{setting}: duplicate prefix in '{raw}'.")
         else:
             raise ConfigurationError(
-                f"{setting}: unbekanntes Präfix '{prefix}:' in '{raw}'. Erlaubt sind nur 'dir:' "
-                "und 'file:' (klein geschrieben). Pfade, deren erster Abschnitt einen Doppelpunkt "
-                "enthält, bitte immer mit 'dir:' oder 'file:' angeben."
+                f"{setting}: unknown prefix '{prefix}:' in '{raw}'. Only 'dir:' and 'file:' "
+                "(lower case) are allowed. Always specify paths whose first segment contains a colon "
+                "with 'dir:' or 'file:'."
             )
     if not value or value != value.strip():
-        raise ConfigurationError(f"{setting}: leerer Pfad oder Leerzeichen am Rand in '{raw}'.")
+        raise ConfigurationError(f"{setting}: empty path or leading/trailing whitespace in '{raw}'.")
     try:
         path = normalize_path(value)
     except InvalidArgumentError as exc:
-        raise ConfigurationError(f"{setting}: ungültiger Pfad '{raw}': {exc}") from None
+        raise ConfigurationError(f"{setting}: invalid path '{raw}': {exc}") from None
     return PathRule(path=path, kind=kind, key=fold_key(path), source=raw.strip())
 
 
@@ -143,8 +143,7 @@ class AccessPolicy:
     def __init__(self, allowed: tuple[PathRule, ...], denied: tuple[PathRule, ...] = ()) -> None:
         if not allowed:
             raise ConfigurationError(
-                "NEXTCLOUD_ALLOWED_PATHS ist leer: Mindestens eine erlaubte Datei oder ein Ordner "
-                "ist erforderlich (fail closed)."
+                "NEXTCLOUD_ALLOWED_PATHS is empty: at least one allowed file or folder is required (fail closed)."
             )
         self._check_duplicates(allowed, "NEXTCLOUD_ALLOWED_PATHS")
         self._check_duplicates(denied, "NEXTCLOUD_DENIED_PATHS")
@@ -152,21 +151,21 @@ class AccessPolicy:
             for other in allowed:
                 if other is not rule and other.kind == "file" and rule.path.startswith(other.path + "/"):
                     raise ConfigurationError(
-                        f"NEXTCLOUD_ALLOWED_PATHS: '{rule.source}' liegt unter der Einzeldatei '{other.source}'."
+                        f"NEXTCLOUD_ALLOWED_PATHS: '{rule.source}' lies below the single file '{other.source}'."
                     )
             for deny in denied:
                 if _same_or_below(rule.key, deny.key):
                     raise ConfigurationError(
-                        f"Widersprüchliche Konfiguration: Die Freigabe '{rule.source}' ist durch den "
-                        f"Ausschluss '{deny.source}' vollständig gesperrt. Bitte einen der beiden Einträge entfernen."
+                        f"Contradictory configuration: the share '{rule.source}' is completely blocked by the "
+                        f"exclusion '{deny.source}'. Please remove one of the two entries."
                     )
         for deny in denied:
             if not any(
                 _same_or_below(deny.key, rule.key) and (rule.kind != "file" or deny.key == rule.key) for rule in allowed
             ):
                 raise ConfigurationError(
-                    f"NEXTCLOUD_DENIED_PATHS: '{deny.source}' liegt unter keiner Freigabe aus "
-                    "NEXTCLOUD_ALLOWED_PATHS und hätte keine Wirkung (Tippfehler?)."
+                    f"NEXTCLOUD_DENIED_PATHS: '{deny.source}' does not lie below any share from "
+                    "NEXTCLOUD_ALLOWED_PATHS and would have no effect (typo?)."
                 )
         self.allowed = allowed
         self.denied = denied
@@ -177,7 +176,7 @@ class AccessPolicy:
         for rule in rules:
             if rule.key in seen:
                 raise ConfigurationError(
-                    f"{setting}: '{rule.source}' und '{seen[rule.key].source}' bezeichnen denselben Pfad."
+                    f"{setting}: '{rule.source}' and '{seen[rule.key].source}' refer to the same path."
                 )
             seen[rule.key] = rule
 

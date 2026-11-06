@@ -168,7 +168,7 @@ async def test_search_tool_finds_root_via_mcp(make_settings) -> None:
     assert sorted(paths(agent.structured_content)) == sorted([ROOT, "03_Agent Datei.txt", f"{ROOT}/Agent Geheim"])
     assert paths(agent_test.structured_content) == [ROOT]
     assert paths(test_txt.structured_content) == [f"{ROOT}/test.txt"]
-    assert finanzen.is_error and "nicht für den MCP-Agenten freigegeben" in finanzen.content[0].text
+    assert finanzen.is_error and "The path is not released for the MCP agent." in finanzen.content[0].text
     assert not any(p.startswith("02_Finanzen") for p in fake.paths_requested())
 
 

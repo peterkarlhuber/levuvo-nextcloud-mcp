@@ -1,6 +1,6 @@
 """Expected, user-facing errors.
 
-Every subclass of :class:`LevuvoError` carries a short German message that is safe to
+Every subclass of :class:`LevuvoError` carries a short English message that is safe to
 show to an MCP client: it never contains credentials, tokens, HTTP headers or document
 content. The MCP layer converts these errors into SDK ``ToolError`` results; anything
 else is treated as an unexpected crash and only a generic message reaches the client.

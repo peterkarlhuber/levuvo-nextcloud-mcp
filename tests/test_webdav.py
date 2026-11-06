@@ -169,7 +169,7 @@ async def test_redirect_is_never_followed() -> None:
         return httpx.Response(302, headers={"Location": "https://attacker.example/collect"})
 
     async with NextcloudWebDAV(config(), transport=httpx.MockTransport(redirect)) as dav:
-        with pytest.raises(NextcloudError, match="Weiterleitung"):
+        with pytest.raises(NextcloudError, match="redirect"):
             await dav.info("05_Projekte/Planung.md")
     assert requested == ["storage.levuvo.com"]
 

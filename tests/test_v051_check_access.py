@@ -8,7 +8,7 @@ Semantics used (Nextcloud WebDAV documentation, "basic.html"):
   mount root is documented as unshare.
 * ``ocs:share-permissions``: "The permissions that the user has over the share" (1 read, 2 update,
   4 create, 8 delete, 16 share).
-* ``N``/``V`` on a mount root are NOT documented -> must stay "nicht abschließend verifiziert".
+* ``N``/``V`` on a mount root are NOT documented -> must stay "not conclusively verified".
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ async def test_sgdn_share_root_with_sg_child_is_read_only_content_but_not_fully_
     assert entry["children_checked"] == 1 and entry["children_with_write_permissions"] == []
     # N on a mount root is undocumented: the result must NOT be presented as verified.
     assert entry["verified"] is False
-    assert any(point.startswith("N am Einhängepunkt") for point in entry["open_points"])
+    assert any(point.startswith("N on the mount point") for point in entry["open_points"])
     assert any("unshare" in note for note in entry["notes"])
     assert all(method == "PROPFIND" for method, _ in fake.requests)
     assert all(b"share-permissions" in body and b"is-mount-root" in body for body in fake.propfind_bodies)
@@ -122,7 +122,7 @@ async def test_own_storage_with_full_rights_is_reported(make_settings, nextcloud
     nextcloud.extra_props = {p: share_props(root=False, bits=None, mount_type="") for p in nextcloud.folders}
     [entry] = await check(make_settings, nextcloud, "dir:05_Projekte/Offen")
     assert entry["assessment"] == "write_possible" and entry["verified"] is True
-    assert any("eigenen Speicher" in note for note in entry["notes"])
+    assert any("own storage" in note for note in entry["notes"])
 
 
 # --------------------------------------------------------------------------- empty folder / file share
@@ -132,7 +132,7 @@ async def test_empty_share_folder(make_settings) -> None:
     fake.extra_props = {"Leer": share_props(root=True, bits=1)}
     [entry] = await check(make_settings, fake, "dir:Leer")
     assert entry["children_checked"] == 0 and entry["assessment"] == "read_only_content"
-    assert any("leer" in note for note in entry["notes"])
+    assert any("is empty" in note for note in entry["notes"])
 
 
 async def test_direct_file_share(make_settings) -> None:
@@ -183,7 +183,7 @@ async def test_subfolders_are_only_checked_one_level_deep(make_settings) -> None
     # S/Unter has D but is not a mount root -> definite write finding on the immediate child.
     assert entry["assessment"] == "write_possible"
     assert entry["children_with_write_permissions"] == ["S/Unter"]
-    assert any("tiefere Unterordner" in point for point in entry["open_points"])
+    assert any("deeper subfolders" in point for point in entry["open_points"])
 
 
 async def test_truncated_listing_is_not_verified(make_settings, monkeypatch) -> None:
@@ -232,22 +232,32 @@ def run_check(monkeypatch, capsys, make_settings, fake: FakeNextcloud, *allowed:
 def test_cli_sgdn_shows_hint_not_warning(monkeypatch, capsys, make_settings) -> None:
     code, report, err = run_check(monkeypatch, capsys, make_settings, sgdn_share(), "dir:SGDN-Freigabe")
     assert code == 0
-    assert "WARNUNG" not in err
-    assert "HINWEIS" in err and "nicht abschließend verifiziert" in err and "manuelle Prüfung" in err
+    assert "WARNING" not in err
+    assert err.startswith(
+        "NOTE: Permissions not conclusively verified - manual check required for: dir:SGDN-Freigabe. "
+        "See 'open_points' (SECURITY.md)."
+    )
     assert report[0]["assessment"] == "read_only_content"
 
 
 def test_cli_real_write_rights_show_warning(monkeypatch, capsys, make_settings) -> None:
     fake = sgdn_share(child_permissions="SGDNVW")
     code, _, err = run_check(monkeypatch, capsys, make_settings, fake, "dir:SGDN-Freigabe")
-    assert code == 0 and "WARNUNG" in err and "dir:SGDN-Freigabe" in err
+    assert code == 0
+    assert (
+        "WARNING: The technical account has write, delete or create permissions in Nextcloud on the contents of: "
+        "dir:SGDN-Freigabe. The MCP server never writes, but these shares should be read-only (see SECURITY.md)."
+    ) in err
 
 
 def test_cli_webdav_error_exits_with_1(monkeypatch, capsys, make_settings) -> None:
     fake = sgdn_share()
     fake.status_override = {"SGDN-Freigabe": 500}
     code, report, err = run_check(monkeypatch, capsys, make_settings, fake, "dir:SGDN-Freigabe")
-    assert code == 1 and "Nextcloud-Prüfung fehlgeschlagen" in err
+    assert (
+        code == 1
+        and "Nextcloud check failed for dir:SGDN-Freigabe: Nextcloud is currently unavailable (HTTP 500)." in err
+    )
     assert report[0]["assessment"] == "error"
 
 

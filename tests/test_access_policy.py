@@ -106,7 +106,7 @@ def test_explicit_file_path_is_exact_match() -> None:
 
 def test_denial_always_wins_even_if_explicit_allow_file() -> None:
     # v0.5: an allow entry that is completely covered by a deny is a contradiction -> startup error.
-    with pytest.raises(ConfigurationError, match="vollständig gesperrt"):
+    with pytest.raises(ConfigurationError, match="completely blocked"):
         cfg("05_Projekte", "file:05_Projekte/Vertraulich/Kundenvertrag.pdf", denied=("05_Projekte/Vertraulich",))
     s = cfg("05_Projekte", denied=("05_Projekte/Vertraulich",))
     with pytest.raises(PermissionError):
@@ -135,7 +135,7 @@ async def test_virtual_listing_file_and_folder_are_reported_correctly() -> None:
             ("05_Projekte", True),
             ("06_Marketing/CI.pdf", False),
         ]
-        with pytest.raises(ValueError, match="Datei"):
+        with pytest.raises(ValueError, match="This is a file"):
             await dav.list_files("06_Marketing/CI.pdf")
         assert (await dav.info("06_Marketing/CI.pdf")).is_dir is False
     assert all(method == "PROPFIND" for method, _ in calls)
@@ -199,7 +199,7 @@ async def test_untyped_file_path_is_detected_from_webdav_not_extension() -> None
 async def test_explicit_type_mismatch_is_error() -> None:
     for entry in ("file:05_Projekte", "dir:06_Marketing/CI.pdf"):
         async with NextcloudWebDAV(cfg(entry), transport=httpx.MockTransport(make_handler([]))) as dav:
-            with pytest.raises(WebDAVError, match="Freigabe-Typ"):
+            with pytest.raises(WebDAVError, match="entry type contradicts"):
                 await dav.list_files()
 
 
@@ -232,5 +232,5 @@ def test_environment_requires_allowed_paths(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("NEXTCLOUD_USERNAME", "agent.levuvo")
     monkeypatch.setenv("NEXTCLOUD_APP_PASSWORD", "DUMMY_TEST_SECRET")
     monkeypatch.delenv("NEXTCLOUD_ALLOWED_PATHS", raising=False)
-    with pytest.raises(ConfigurationError, match="Mindestens eine erlaubte Datei"):
+    with pytest.raises(ConfigurationError, match="at least one allowed file"):
         Settings.from_env()
