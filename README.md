@@ -281,14 +281,15 @@ levuvo-nextcloud-mcp/
 │   ├── policy.py                # path normalization, allow/deny logic
 │   ├── settings.py              # Nextcloud configuration, .env lookup
 │   ├── webdav.py                # Nextcloud client (GET/PROPFIND only)
-│   ├── extractors.py            # text from TXT/CSV/PDF/DOCX/XLSX/RTF
+│   ├── extractors.py            # text from TXT/CSV/HTML/PDF/DOCX/XLSX/RTF
+│   ├── doc_cache.py             # bounded cache of extracted text (path + ETag)
 │   ├── errors.py                # expected errors with user-facing messages
 │   ├── remote_settings.py       # remote configuration
 │   ├── static_bearer.py         # static bearer token
 │   └── jwt_tokens.py            # verification of OAuth JWT access tokens
 ├── tests/
 ├── deploy/                      # Caddy and systemd examples
-├── docs/LOCAL_SETUP_MACOS.md, docs/MCP_TOOLS.md, docs/REMOTE.md, docs/TROUBLESHOOTING.md
+├── docs/LOCAL_SETUP_MACOS.md, docs/MCP_TOOLS.md, docs/REMOTE.md, docs/TROUBLESHOOTING.md, docs/PERFORMANCE_0.5.2.md
 ├── .github/workflows/ci.yml
 ├── SECURITY.md
 └── CHANGELOG.md
