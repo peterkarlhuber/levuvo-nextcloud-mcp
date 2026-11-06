@@ -1,0 +1,7 @@
+# DNS A/AAAA for mcp.levuvo.com must point to the proxy host.
+# This machine must accept HTTPS on 443 and reach loopback :8765.
+# Do not point the public DNS record to Hetzner Storage Share.
+mcp.levuvo.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8765
+}
