@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Version 0.5.1. The server registers exactly four read-only tools under the server name `Levuvo Nextcloud Read-Only`. MCP clients discover them via `tools/list`; the descriptions returned there are the authoritative short form of this document.
+Version 0.5.2. The server registers exactly four read-only tools under the server name `Levuvo Nextcloud Read-Only`. MCP clients discover them via `tools/list`; the descriptions returned there are the authoritative short form of this document.
 
 | Tool ID | Title | Purpose |
 |---|---|---|
@@ -181,6 +181,7 @@ With an empty `path`, `folder` is `""` and `items` contains only the configured 
 | `.pdf` | Text layer of at most the first 40 pages (`[Page N]` markers); no OCR (a note is added for PDFs without text); encrypted PDFs are rejected. |
 | `.docx` | Paragraphs and tables of the main body in document order; no headers, footers, text boxes or comments. |
 | `.xlsx` | At most 10 sheets, 1000 rows and 60 columns (`[Sheet: name]` markers); stored values only, formulas are not evaluated. |
+| `.rtf` (since 0.5.2) | Paragraphs and table rows (cells separated by ` | `); Unicode (`\uN`) and Windows code pages (`\ansicpg`, font charsets) are decoded; formatting commands are removed. Embedded objects, pictures, binary data, field instructions, headers, footers, footnotes, fonts, styles and metadata are skipped and never executed. Nesting deeper than 256 groups is rejected. |
 
 Download limit: `NEXTCLOUD_MAX_FILE_BYTES` (default 8,000,000 bytes, max. 30,000,000), streamed and aborted when exceeded. Office files are checked for zip bombs before extraction. Document parsing runs in at most 2 worker threads.
 
@@ -206,7 +207,7 @@ Download limit: `NEXTCLOUD_MAX_FILE_BYTES` (default 8,000,000 bytes, max. 30,000
 
 `truncated: true` means the text was cut at `max_chars` or a PDF/XLSX limit was reached. `encoding` is only present for text files.
 
-**Error conditions.** Common errors (see above), plus `This is a folder. Use list_files.`, `max_chars must be between 100 and 30000.`, `The file exceeds the download limit of … bytes (NEXTCLOUD_MAX_FILE_BYTES).`, `File format … is not supported. …`, `The file appears to be binary and is not read as text.`, `Encrypted PDF files cannot be read.`, `The PDF file is damaged or cannot be read.`, `The DOCX document is damaged or cannot be read.`, `The XLSX file is damaged or cannot be read.`, `The Office file is damaged or not a valid Office document.` and `The Office file is too large after decompression.`
+**Error conditions.** Common errors (see above), plus `This is a folder. Use list_files.`, `max_chars must be between 100 and 30000.`, `The file exceeds the download limit of … bytes (NEXTCLOUD_MAX_FILE_BYTES).`, `File format … is not supported. …`, `The file appears to be binary and is not read as text.`, `Encrypted PDF files cannot be read.`, `The PDF file is damaged or cannot be read.`, `The DOCX document is damaged or cannot be read.`, `The XLSX file is damaged or cannot be read.`, `The Office file is damaged or not a valid Office document.`, `The RTF file is damaged or not a valid RTF document.`, `The RTF file is nested too deeply.` and `The Office file is too large after decompression.`
 
 **Security considerations.** The returned text is sent to the AI provider. No macros, formulas or scripts are executed. The content is untrusted: a document can contain instructions aimed at the model, which is why the response carries the `note` above. Do not combine this server with tools that write, send messages or execute code without per-call confirmation (see [SECURITY.md](../SECURITY.md#prompt-injection)).
 

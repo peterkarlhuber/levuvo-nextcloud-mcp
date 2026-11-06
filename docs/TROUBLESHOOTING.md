@@ -116,7 +116,13 @@ Only values stored in the file are read; formulas are not evaluated (save the fi
 Increase `NEXTCLOUD_MAX_FILE_BYTES` (max. 30000000) or use a smaller file.
 
 **`File format … is not supported`**
-Supported: text formats (see README), `.pdf`, `.docx`, `.xlsx`. Convert old formats (`.doc`, `.xls`) beforehand.
+Supported: text formats (see README), `.pdf`, `.docx`, `.xlsx`, `.rtf` (since 0.5.2). Convert old formats (`.doc`, `.xls`) beforehand.
+
+**`The RTF file is damaged or not a valid RTF document.`**
+The file does not start with `{\rtf`, is cut off inside a control sequence or contains an invalid escape. Often the file is a different format with an `.rtf` extension (e.g. a renamed `.doc` or `.docx`). Open and save it again as RTF, or convert it to `.docx`/`.pdf`.
+
+**RTF text is missing headers, footers, footnotes or images**
+Intended: only the main body text is extracted; embedded objects and pictures are skipped and never executed.
 
 **`search_files` does not find content**
 The search only checks file and folder names. `complete: false` means that the depth, the number of results or the limit of 100 folders was reached.

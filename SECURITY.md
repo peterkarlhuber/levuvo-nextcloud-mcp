@@ -1,4 +1,4 @@
-# Security – Levuvo Nextcloud MCP 0.5.1
+# Security – Levuvo Nextcloud MCP 0.5.2
 
 This document describes what the server protects against, what it does not protect against, and what needs to be done on the Nextcloud side and in operation.
 
@@ -101,8 +101,8 @@ A small quota is at most an optional damage limitation. What matters are read-on
 - **Contradictions prevent startup:** empty list of released entries, duplicates, ineffective exclusions, completely blocked released entries, entries below `file:` entries, unknown prefixes.
 - **Type check:** `dir:`/`file:` are checked against the real Nextcloud type; paths below a released entry without prefix are only reachable if that entry really is a folder.
 - **Responses from Nextcloud:** no redirects (credentials never go to another destination), TLS verification enabled, proxy/`.netrc` settings of the environment are ignored. XML is parsed with `defusedxml` and DTDs forbidden. `href` entries of foreign hosts or outside the user path are discarded; each segment is decoded exactly once.
-- **Limits against overload:** directory response max. 2 MB and 2000 entries, download max. `NEXTCLOUD_MAX_FILE_BYTES` (default 8 MB, streamed), search max. 100 folders and 4 parallel requests, text output max. 30000 characters, document extraction in max. 2 parallel worker threads, PDF max. 40 pages, XLSX max. 10 sheets/1000 rows/60 columns, zip bomb check for Office files. Remote additionally: request body 128 KiB, 32 concurrent connections.
-- **No execution:** no macros, no formula evaluation, no OCR, no shell.
+- **Limits against overload:** directory response max. 2 MB and 2000 entries, download max. `NEXTCLOUD_MAX_FILE_BYTES` (default 8 MB, streamed), search max. 100 folders and 4 parallel requests, text output max. 30000 characters, document extraction in max. 2 parallel worker threads, PDF max. 40 pages, XLSX max. 10 sheets/1000 rows/60 columns, RTF max. 256 nested groups, zip bomb check for Office files. Remote additionally: request body 128 KiB, 32 concurrent connections.
+- **No execution:** no macros, no formula evaluation, no OCR, no shell. RTF files are read by a built-in, linear-time tokenizer that skips embedded objects, pictures, binary data and field instructions instead of interpreting them.
 
 ## Prompt injection
 
@@ -156,4 +156,4 @@ A public endpoint is only justifiable after this list **and** successful tests w
 - **Over-blocking:** the cautious exclusion comparison can also block paths that are only spelled similarly (e.g. `Intern` also blocks `intern` and `Intern.`). This is intended.
 - **Names of excluded entries:** Nextcloud includes them in the listing of the parent folder. The server filters them out and does not pass them to the model, but they are briefly held in memory.
 - **App password with full rights:** if the `.env` falls into the wrong hands, none of the MCP protections help. Only the Nextcloud side (read-only shares) then limits the damage.
-- **Dependencies:** the parsers for PDF/DOCX/XLSX and the MCP SDK are third-party code. Pin versions via the lockfiles and update them regularly.
+- **Dependencies:** the parsers for PDF/DOCX/XLSX and the MCP SDK are third-party code (the RTF reader is part of this project). Pin versions via the lockfiles and update them regularly.

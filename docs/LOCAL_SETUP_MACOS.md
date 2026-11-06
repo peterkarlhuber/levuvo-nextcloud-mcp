@@ -2,7 +2,7 @@
 
 This guide sets up `levuvo-nextcloud-mcp` completely on a Mac: Claude Code starts the server locally via `stdio` and uses it to read explicitly released files from the Hetzner Storage Share `https://storage.levuvo.com`.
 
-As of: version 0.5.1, 2026-11-06.
+As of: version 0.5.2, 2026-11-06.
 
 > **No SSH and no Hetzner Cloud server required.** Local stdio operation only needs the Mac, the GitHub repository and a Nextcloud app password. No port is opened and nothing is hosted. The existing SSH key `levuvo_hetzner` only matters for a later server deployment (see [Appendix: SSH key](#appendix-ssh-key-only-for-later-server-operation)).
 
@@ -103,7 +103,7 @@ Important:
 
 | Command | Checks | Does not check |
 |---|---|---|
-| `--version` | Installed version (expected: `levuvo-nextcloud-mcp 0.5.1`) | – |
+| `--version` | Installed version (expected: `levuvo-nextcloud-mcp 0.5.2`) | – |
 | `--check-config` | Offline: required values, syntax of the released entries, contradictions, loaded file (`config_file`). Prints no secrets. | Whether the credentials are correct or the paths exist in Nextcloud |
 | `--check-nextcloud` | Online, read-only (`PROPFIND`): login, existence and type of each released entry, Nextcloud permissions on the entry and on the **immediate** child entries of a folder | Deeper subfolders, excluded entries, the behavior in Claude Code, write attempts (never made) |
 

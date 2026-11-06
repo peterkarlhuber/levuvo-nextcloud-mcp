@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.2 – 2026-11-06
+
+Feature release. Backward compatible: same four tools, same parameters, same environment variables, same read-only model (`GET`/`PROPFIND` only). No new dependencies; lockfiles unchanged.
+
+### Added
+
+- **`read_file` reads `.rtf` (Rich Text Format).** Paragraphs, line breaks, tabs and table rows (cells separated by ` | `) are extracted; formatting commands are removed. Umlauts and other characters are decoded from `\'hh` escapes using the document code page (`\ansicpg`) or the font charset (`\fcharset`), Unicode from `\uN` (including `\ucN` fallback skipping and surrogate pairs for characters outside the BMP) and raw 8-bit bytes.
+- Fonts, colours, styles, document metadata, headers, footers, footnotes, comments, field instructions (the visible field result is kept), embedded objects, pictures and `\binN` binary data are skipped and never interpreted or executed.
+
+### Security
+
+- The RTF reader is built into the project instead of using a third-party library. Every token pattern is bounded or a plain character class, so scanning is linear in the input size even for crafted files; binary payloads are skipped by their declared length; nesting deeper than 256 groups is rejected (`The RTF file is nested too deeply.`). The reviewed library candidate (`striprtf`) applies regular expressions with unbounded `.*` to whole lines of the document and does not handle `\bin` outside pictures, which was not acceptable for untrusted input.
+- All existing limits apply unchanged: download limit `NEXTCLOUD_MAX_FILE_BYTES`, `max_chars` (scanning stops early once the limit is reached), at most 2 parallel extraction threads.
+- Damaged or invalid files (no `{\rtf` header, invalid `\'` escape, truncated control sequence, overlong control word, `\bin` beyond the end of the file) are rejected with `The RTF file is damaged or not a valid RTF document.` A document that only lacks closing braces is read as far as it goes, like word processors do.
+
+### Documentation and tests
+
+- `read_file` tool description, README, `docs/MCP_TOOLS.md`, `docs/TROUBLESHOOTING.md` and SECURITY.md updated.
+- New `tests/test_rtf_extraction.py`: valid documents, umlauts, Unicode and surrogates, Cyrillic, Central European and Japanese code pages, tables, special characters, skipped destinations, objects/pictures/binary data, damaged files, nesting and `max_chars` limits, a linear-time check with large crafted input, and `read_file` through the real MCP tool including the download limit.
+
 ## 0.5.1 – 2026-11-06
 
 Patch release. Backward compatible: same four tools, same parameters, same environment variables, same read-only model (`GET`/`PROPFIND` only).

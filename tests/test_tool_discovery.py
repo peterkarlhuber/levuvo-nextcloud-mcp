@@ -224,6 +224,8 @@ async def test_descriptions_state_the_key_facts(tools) -> None:
         ".pdf",
         ".docx",
         ".xlsx",
+        ".rtf",
+        "embedded objects",
         ".txt",
         "40 pages",
         "no OCR",

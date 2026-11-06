@@ -12,7 +12,7 @@ Read-only MCP server (Model Context Protocol) for Levuvo's Hetzner Storage Share
 
 ## Overview and status
 
-- **Version:** 0.5.1 (Python 3.11+, MIT license).
+- **Version:** 0.5.2 (Python 3.11+, MIT license).
 - **Local (default):** Claude Code starts the server via `stdio` on the Mac. No open port, no hosting.
 - **Remote (optional):** Streamable HTTP on `127.0.0.1` behind a TLS reverse proxy, with a static bearer token or OAuth (external identity provider required).
 - **Read only:** The server sends only `GET` and `PROPFIND` to Nextcloud. There are no tools for writing, deleting, moving or sharing.
@@ -36,12 +36,13 @@ All four tools carry the MCP annotations `readOnlyHint=true`, `destructiveHint=f
 
 Expected errors (path not released, file too large, Nextcloud unreachable …) are returned as MCP tool errors with a clear message. On unexpected crashes the client receives only a generic message (`Error executing tool <name>`); details go to the server log on stderr.
 
-**Formats supported by `read_file`:** text formats (`.txt .md .markdown .csv .tsv .json .jsonl .yaml .yml .xml .html .htm .log .toml .ini .cfg .py .js .ts .css .sql .rst`), `.pdf`, `.docx`, `.xlsx`.
+**Formats supported by `read_file`:** text formats (`.txt .md .markdown .csv .tsv .json .jsonl .yaml .yml .xml .html .htm .log .toml .ini .cfg .py .js .ts .css .sql .rst`), `.pdf`, `.docx`, `.xlsx`, `.rtf`.
 
 - Text: UTF-8 (with or without BOM), UTF-16 with BOM, otherwise Windows-1252 (`encoding: "cp1252"`, typical for Excel CSV). Binary content is rejected.
 - PDF: at most 40 pages, no OCR; scanned PDFs produce a note. Encrypted PDFs are rejected.
 - DOCX: paragraphs and tables of the main body in document order (no headers/footers, text boxes, comments).
 - XLSX: at most 10 sheets, 1000 rows, 60 columns; stored values only, formulas are not evaluated.
+- RTF (since 0.5.2): paragraphs, table rows (cells separated by ` | `), umlauts and Unicode; formatting is removed. Embedded objects, pictures, headers, footers and footnotes are skipped, never executed. Damaged RTF files produce a clear error message.
 - Office files are checked for zip bombs before extraction; damaged documents produce a clear error message.
 - Download limit: `NEXTCLOUD_MAX_FILE_BYTES` (default 8 MB).
 
@@ -221,7 +222,7 @@ uv run --extra dev ruff format --check .
 
 The GitHub Actions pipeline `.github/workflows/ci.yml` checks `uv lock --check`, `ruff check` and `ruff format --check` and runs `pytest` on Python 3.11, 3.12 and 3.13 (Ubuntu) and 3.12 on macOS. Another job installs from `requirements-dev.lock` with `--require-hashes` (the documented pip route). Note: `uv run` without `--extra dev` removes the development tools from `.venv` again.
 
-**Local test run for 0.5.1 (2026-11-06, Python 3.13, maintainer environment):** 441 tests passed, 0 failed; line/branch coverage 92 %. `ruff check`, `ruff format --check` and `uv lock --check` without findings. CI results for 3.11–3.13, macOS and the lockfile install are shown on the pull request.
+**Local test run for 0.5.2 (2026-11-06, Python 3.13, maintainer environment):** 478 tests passed, 0 failed; line/branch coverage 92 %. `ruff check`, `ruff format --check` and `uv lock --check` without findings. CI results for 3.11–3.13, macOS and the lockfile install are shown on the pull request.
 
 The automated tests run offline against simulated WebDAV responses. Tests against the real Storage Share with the real client have so far only been reported by the user (see [Overview and status](#overview-and-status) and [Compatibility](#compatibility)).
 
@@ -278,7 +279,7 @@ levuvo-nextcloud-mcp/
 │   ├── policy.py                # path normalization, allow/deny logic
 │   ├── settings.py              # Nextcloud configuration, .env lookup
 │   ├── webdav.py                # Nextcloud client (GET/PROPFIND only)
-│   ├── extractors.py            # text from TXT/CSV/PDF/DOCX/XLSX
+│   ├── extractors.py            # text from TXT/CSV/PDF/DOCX/XLSX/RTF
 │   ├── errors.py                # expected errors with user-facing messages
 │   ├── remote_settings.py       # remote configuration
 │   ├── static_bearer.py         # static bearer token
