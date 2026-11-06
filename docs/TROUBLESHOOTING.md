@@ -163,3 +163,23 @@ Browser requests (with an `Origin` header) are not permitted.
 
 **413 `Request body too large`**
 Requests over 128 KiB are rejected.
+
+## Version, limits and search (since 0.5.3)
+
+**Claude reports an old version or old limits**
+Tool descriptions and schemas are generated when the MCP process starts. After `git pull`/`uv sync` or a change to the `.env`, restart the MCP process (quit and reopen Claude Desktop, or reconnect the server via `/mcp` in Claude Code). Check with `.venv/bin/levuvo-nextcloud-mcp --version` and `.venv/bin/levuvo-nextcloud-mcp --check-config`; every tool description starts with `Levuvo Nextcloud MCP v<version> - ...`, and `read_file` shows `Configured maximum file size: N bytes.`
+
+**`search_files` returns `complete: false`**
+`incomplete_reasons` says why: `depth_limit` - subfolders deeper than `max_depth` were not searched (raise `max_depth` or search a subfolder with `path`); `directory_limit` - the folder budget `NEXTCLOUD_SEARCH_MAX_DIRECTORIES` was used up (search a subfolder with `path` or raise the budget); `result_limit` - more hits exist than `max_results` (narrow the query or raise `max_results`).
+
+**`max_depth must be between 0 and N` / `max_results must be between 1 and N`**
+N is the server-side cap from `NEXTCLOUD_SEARCH_MAX_DEPTH` / `NEXTCLOUD_SEARCH_MAX_RESULTS`. Use a smaller value or raise the cap in the `.env` (max. 20 / 500) and restart the MCP process.
+
+**`Configuration error: NEXTCLOUD_SEARCH_MAX_DEPTH must be between 3 and 20.`**
+Allowed ranges: `NEXTCLOUD_SEARCH_MAX_DEPTH` 3–20, `NEXTCLOUD_SEARCH_MAX_DIRECTORIES` 1–1000, `NEXTCLOUD_SEARCH_MAX_RESULTS` 25–500; whole numbers only.
+
+**`path must be a folder; this is a file`**
+`search_files` with `path` searches inside a folder. For a single file use `get_file_info` or `read_file`.
+
+**A large search is slow**
+With `NEXTCLOUD_SEARCH_MAX_DIRECTORIES=1000` a search sends up to 1000 `PROPFIND` requests (4 in parallel), which can take tens of seconds. Use `path` to start in the relevant subfolder.

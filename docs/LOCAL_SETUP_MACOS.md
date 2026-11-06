@@ -2,7 +2,7 @@
 
 This guide sets up `levuvo-nextcloud-mcp` completely on a Mac: Claude Code starts the server locally via `stdio` and uses it to read explicitly released files from the Hetzner Storage Share `https://storage.levuvo.com`.
 
-As of: version 0.5.2, 2026-11-06.
+As of: version 0.5.3, 2026-11-06.
 
 > **No SSH and no Hetzner Cloud server required.** Local stdio operation only needs the Mac, the GitHub repository and a Nextcloud app password. No port is opened and nothing is hosted. The existing SSH key `levuvo_hetzner` only matters for a later server deployment (see [Appendix: SSH key](#appendix-ssh-key-only-for-later-server-operation)).
 
@@ -92,6 +92,7 @@ Important:
 - Write spaces literally, without quotes and without `%20`.
 - `.env` is listed in `.gitignore` and must never be committed, copied into chats or shown in screenshots.
 - `chmod 600` ensures that only your own macOS account can read the file. Otherwise the server warns at startup.
+- Optional limits (see `.env.example`): `NEXTCLOUD_MAX_FILE_BYTES` (default 25000000, max. 100000000) and, since 0.5.3, `NEXTCLOUD_SEARCH_MAX_DEPTH` (default 6, 3–20), `NEXTCLOUD_SEARCH_MAX_DIRECTORIES` (default 100, 1–1000) and `NEXTCLOUD_SEARCH_MAX_RESULTS` (default 100, 25–500). Without them the defaults apply.
 
 ## 6. Check
 
@@ -103,7 +104,7 @@ Important:
 
 | Command | Checks | Does not check |
 |---|---|---|
-| `--version` | Installed version (expected: `levuvo-nextcloud-mcp 0.5.2`) | – |
+| `--version` | Installed version (expected: `levuvo-nextcloud-mcp 0.5.3`) | – |
 | `--check-config` | Offline: required values, syntax of the released entries, contradictions, loaded file (`config_file`). Prints no secrets. | Whether the credentials are correct or the paths exist in Nextcloud |
 | `--check-nextcloud` | Online, read-only (`PROPFIND`): login, existence and type of each released entry, Nextcloud permissions on the entry and on the **immediate** child entries of a folder | Deeper subfolders, excluded entries, the behavior in Claude Code, write attempts (never made) |
 
@@ -191,7 +192,8 @@ Step 5 is the negative test: `02_Finanzen` is not released and is rejected **bef
 | `--check-nextcloud`: WARNING | Real write rights. Change the share with `agent.levuvo` to read-only and check again. |
 | `--check-nextcloud`: NOTE | Not everything could be settled automatically. Read `open_points` and check manually (step 6). |
 | Server missing in `/mcp` | Use a Local session; close and reopen the chat window (step 8); check `claude mcp list`. |
-| Search does not find something | `search_files` only compares file and folder names, not content. `complete: false` means: depth, number of results or folder limit reached. |
+| Search does not find something | `search_files` only compares file and folder names, not content. `complete: false` means hits may be missing; `incomplete_reasons` names the limit (`depth_limit`, `directory_limit`, `result_limit`). Search a subfolder with `path` or raise the limits. |
+| Claude reports an old version or old limits | The MCP process still runs the old code or `.env`. Restart Claude Code / the chat window; the tool descriptions must start with `Levuvo Nextcloud MCP v0.5.3`. |
 
 More cases: [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
@@ -206,6 +208,22 @@ uv sync --extra dev --frozen
 ```
 
 Afterwards, close and reopen the Claude Code chat window or restart Claude Code. The registration from step 7 remains valid as long as the project folder is not moved. `git pull` does not change `.env`. New variables, if any, are listed in `CHANGELOG.md` and `.env.example`.
+
+### Updating to 0.5.3
+
+1. Run the commands above; `--version` must print `levuvo-nextcloud-mcp 0.5.3`.
+2. Optional: add the new search limits to `.env` (without them the 0.5.2 limits apply). Example for a larger structure:
+
+   ```dotenv
+   NEXTCLOUD_MAX_FILE_BYTES=100000000
+   NEXTCLOUD_SEARCH_MAX_DEPTH=20
+   NEXTCLOUD_SEARCH_MAX_DIRECTORIES=1000
+   NEXTCLOUD_SEARCH_MAX_RESULTS=500
+   ```
+
+3. Run `--check-config`: it prints `max_file_bytes` and a `search` block with the effective limits.
+4. Restart Claude (Claude Code: close and reopen the chat window; Claude Desktop: quit and reopen the app). Changes to `.env` are only picked up by a new MCP process.
+5. Ask Claude: "Which version does the connected Levuvo Nextcloud server report, and which file size and search limits are configured?" The answer should be taken from the tool descriptions, e.g. `Levuvo Nextcloud MCP v0.5.3`, `Configured maximum file size: 100000000 bytes.` and `Configured maximum depth: 20.`
 
 ## Security in brief
 

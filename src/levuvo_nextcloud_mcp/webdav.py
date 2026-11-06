@@ -60,8 +60,9 @@ PROPFIND_DIAGNOSTIC_XML = b"""<?xml version="1.0" encoding="utf-8"?>
 ALLOWED_METHODS = frozenset({"GET", "PROPFIND"})
 MAX_XML_BYTES = 2_000_000
 MAX_DIRECTORY_ITEMS = 2000
-MAX_SEARCH_DIRECTORIES = 100
 SEARCH_CONCURRENCY = 4
+# Why search_files may report complete=false, in the order they are listed.
+INCOMPLETE_REASONS = ("depth_limit", "directory_limit", "result_limit")
 EXTRACTION_CONCURRENCY = 2
 # Files above this size are downloaded and extracted one at a time (RAM on small servers).
 LARGE_FILE_BYTES = 16_000_000
@@ -361,29 +362,54 @@ class NextcloudWebDAV:
         children.sort(key=lambda item: (not item["is_dir"], item["name"].casefold()))
         return {"folder": normalized, "items": children[:limit], "truncated": len(children) > limit}
 
-    async def search_files(self, query: str, *, max_depth: int = 3, max_results: int = 25) -> dict:
+    async def search_files(self, query: str, *, path: str = "", max_depth: int = 3, max_results: int = 25) -> dict:
+        """Breadth-first name search below the released entries or below one released folder (*path*).
+
+        The server-side limits come from the settings (``NEXTCLOUD_SEARCH_*``); a call can lower
+        but never exceed them. ``complete`` is only true if the chosen area was searched entirely;
+        otherwise ``incomplete_reasons`` names every limit that actually cut the search.
+        """
+        depth_cap = self.config.search_max_depth
+        result_cap = self.config.search_max_results
+        budget = self.config.search_max_directories
         if not isinstance(query, str) or not query.strip() or len(query) > 120:
             raise InvalidArgumentError("A search string of 1-120 characters is required.")
-        if not isinstance(max_depth, int) or not 0 <= max_depth <= 6:
-            raise InvalidArgumentError("max_depth must be between 0 and 6.")
-        if not isinstance(max_results, int) or not 1 <= max_results <= 100:
-            raise InvalidArgumentError("max_results must be between 1 and 100.")
+        if isinstance(max_depth, bool) or not isinstance(max_depth, int) or not 0 <= max_depth <= depth_cap:
+            raise InvalidArgumentError(f"max_depth must be between 0 and {depth_cap}.")
+        if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= result_cap:
+            raise InvalidArgumentError(f"max_results must be between 1 and {result_cap}.")
+        if not isinstance(path, str):
+            raise InvalidArgumentError("path must be a string.")
         term = unicodedata.normalize("NFC", query).casefold().strip()
         matches: list[dict] = []
         matched: set[str] = set()
+        reasons: set[str] = set()
 
         def consider(entry: FileInfo) -> None:
-            if len(matches) < max_results and entry.path not in matched and term in entry.name.casefold():
-                matches.append(entry.to_dict())
-                matched.add(entry.path)
+            if entry.path in matched or term not in entry.name.casefold():
+                return
+            if len(matches) >= max_results:
+                reasons.add("result_limit")  # a further hit exists that is not returned
+                return
+            matches.append(entry.to_dict())
+            matched.add(entry.path)
 
         frontier: list[str] = []
-        for rule in self.policy.allowed:
-            metadata = await self.info(rule.path)
-            # Every released entry is itself a candidate - files *and* folders (fixed in 0.5.1).
-            consider(metadata)
-            if metadata.is_dir:
-                frontier.append(metadata.path)
+        scope = ""
+        if path:
+            # The start folder is checked by the central policy like every other path; its own
+            # name is not a candidate, only what lies inside it.
+            scope = self.policy.check(path)
+            start = await self.info(scope)
+            if not start.is_dir:
+                raise InvalidArgumentError("path must be a folder; this is a file. Use get_file_info or read_file.")
+            frontier.append(scope)
+        else:
+            for rule in self.policy.allowed:
+                metadata = await self.info(rule.path)
+                consider(metadata)  # released files and folders are candidates themselves
+                if metadata.is_dir:
+                    frontier.append(metadata.path)
         visited: set[str] = set()
         slots = asyncio.Semaphore(SEARCH_CONCURRENCY)
 
@@ -392,12 +418,15 @@ class NextcloudWebDAV:
                 return await self._propfind(folder, depth=1)
 
         level = 0
-        truncated_by_limit = False
-        while frontier and len(matches) < max_results:
+        while frontier:
+            if len(matches) >= max_results:
+                reasons.add("result_limit")  # folders remain unscanned
+                break
             batch = [folder for folder in dict.fromkeys(frontier) if folder not in visited]
-            room = MAX_SEARCH_DIRECTORIES - len(visited)
+            room = budget - len(visited)
             if len(batch) > room:
-                batch, truncated_by_limit = batch[:room], True
+                batch = batch[:room]
+                reasons.add("directory_limit")
             if not batch:
                 break
             visited.update(batch)
@@ -408,15 +437,23 @@ class NextcloudWebDAV:
                     if entry.path == folder:
                         continue
                     consider(entry)
-                    if entry.is_dir and level < max_depth:
+                    if not entry.is_dir or entry.path in visited:
+                        continue
+                    if level >= max_depth:
+                        reasons.add("depth_limit")  # a subfolder below max_depth is not searched
+                    elif len(frontier) <= budget:  # never queue more folders than could be scanned
                         frontier.append(entry.path)
+                    else:
+                        reasons.add("directory_limit")
             level += 1
-        complete = not frontier and not truncated_by_limit and len(matches) < max_results
+        ordered = [reason for reason in INCOMPLETE_REASONS if reason in reasons]
         return {
             "query": query,
+            "path": scope,
             "results": matches,
             "directories_scanned": len(visited),
-            "complete": complete,
+            "complete": not ordered,
+            "incomplete_reasons": ordered,
             "note": "File and folder name search only; no full-text search inside documents.",
         }
 

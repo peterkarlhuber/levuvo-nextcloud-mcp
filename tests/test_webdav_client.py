@@ -354,12 +354,12 @@ async def test_search_is_parallel_but_bounded(make_settings) -> None:
     assert elapsed < 0.9, elapsed
 
 
-async def test_search_reports_incomplete_when_directory_budget_is_exhausted(make_settings, monkeypatch) -> None:
+async def test_search_reports_incomplete_when_directory_budget_is_exhausted(make_settings) -> None:
     fake = wide_tree(20)
-    monkeypatch.setattr(webdav_module, "MAX_SEARCH_DIRECTORIES", 5)
-    async with client(make_settings("dir:R"), fake) as dav:
+    async with client(make_settings("dir:R", search_max_directories=5), fake) as dav:
         result = await dav.search_files("treffer", max_depth=3)
     assert result["directories_scanned"] == 5 and result["complete"] is False
+    assert result["incomplete_reasons"] == ["directory_limit"]
 
 
 async def test_search_respects_depth_and_result_limit(make_settings, nextcloud) -> None:
