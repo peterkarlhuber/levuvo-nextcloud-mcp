@@ -501,9 +501,9 @@ class NextcloudWebDAV:
                         f"{undocumented} am Einhängepunkt: vermutlich Umbenennen/Verschieben des eigenen Einhängepunkts; "
                         "in der Nextcloud-Doku nicht beschrieben."
                     )
-            elif mount_root is False:
+            elif mount_root is False or meta["mount_type"] == "":
                 definite_write.append(
-                    f"Rechte {''.join(sorted(mount_letters))} an einem Eintrag, der kein Einhängepunkt ist: "
+                    f"Rechte {''.join(sorted(mount_letters))} an einem Eintrag, der kein Einhängepunkt einer Freigabe ist: "
                     "Löschen/Umbenennen wirkt auf die Originaldaten."
                 )
             else:

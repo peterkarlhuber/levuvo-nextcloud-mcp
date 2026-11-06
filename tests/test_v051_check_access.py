@@ -249,3 +249,12 @@ def test_cli_webdav_error_exits_with_1(monkeypatch, capsys, make_settings) -> No
     code, report, err = run_check(monkeypatch, capsys, make_settings, fake, "dir:SGDN-Freigabe")
     assert code == 1 and "Nextcloud-Prüfung fehlgeschlagen" in err
     assert report[0]["assessment"] == "error"
+
+
+async def test_own_storage_with_d_but_unknown_mount_root_is_reported(make_settings) -> None:
+    """Own storage (mount-type '') means the account owns the data: D is a real delete right."""
+    fake = FakeNextcloud(files={"Eigen/a.txt": b"a"})
+    fake.permissions_by_path = {"Eigen": "RGD", "Eigen/a.txt": "RG"}
+    fake.extra_props = {"Eigen": share_props(root=None, bits=None, mount_type="")}
+    [entry] = await check(make_settings, fake, "dir:Eigen")
+    assert entry["assessment"] == "write_possible" and entry["content_writable"] is True
