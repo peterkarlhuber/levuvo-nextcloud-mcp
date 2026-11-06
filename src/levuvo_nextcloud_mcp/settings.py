@@ -1,7 +1,8 @@
 """Configuration loading and validation (environment variables, optional .env file).
 
 Only ``NEXTCLOUD_ALLOWED_PATHS`` and ``NEXTCLOUD_DENIED_PATHS`` configure access; both
-use the identical ``dir:``/``file:`` syntax implemented in :mod:`.policy`.
+use the identical ``dir:``/``file:`` syntax implemented in :mod:`.policy`. The ``NEXTCLOUD_SEARCH_*``
+limits only bound the work of ``search_files`` and never affect what is released.
 """
 
 from __future__ import annotations
@@ -26,6 +27,15 @@ ENV_FILE_VARIABLE = "LEVUVO_MCP_ENV_FILE"
 _PLACEHOLDER_PREFIXES = ("EIGENES_", "HIER_", "CHANGE_ME", "<")
 
 
+# Server-side search limits (NEXTCLOUD_SEARCH_*): (default, minimum, maximum). The defaults are the
+# fixed limits of 0.5.2, so a configuration without these variables behaves exactly as before. The
+# minimums keep the per-call defaults (max_depth=3, max_results=25) valid.
+SEARCH_MAX_DEPTH = (6, 3, 20)
+SEARCH_MAX_DIRECTORIES = (100, 1, 1000)
+SEARCH_MAX_RESULTS = (100, 25, 500)
+MAX_FILE_BYTES = (25_000_000, 1, 100_000_000)
+
+
 def _is_placeholder(value: str) -> bool:
     return any(value.startswith(prefix) for prefix in _PLACEHOLDER_PREFIXES)
 
@@ -40,8 +50,11 @@ class Settings:
     allowed_paths: tuple[str, ...]
     denied_paths: tuple[str, ...] = ()
     user_id: str = ""
-    max_file_bytes: int = 25_000_000
+    max_file_bytes: int = MAX_FILE_BYTES[0]
     timeout_seconds: float = 20.0
+    search_max_depth: int = SEARCH_MAX_DEPTH[0]
+    search_max_directories: int = SEARCH_MAX_DIRECTORIES[0]
+    search_max_results: int = SEARCH_MAX_RESULTS[0]
     policy: AccessPolicy = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -66,8 +79,14 @@ class Settings:
             raise ConfigurationError("NEXTCLOUD_USERNAME is missing.")
         if not self.app_password or _is_placeholder(self.app_password):
             raise ConfigurationError("NEXTCLOUD_APP_PASSWORD is missing or still contains a placeholder.")
-        if not (1 <= self.max_file_bytes <= 100_000_000):
-            raise ConfigurationError("NEXTCLOUD_MAX_FILE_BYTES must be between 1 and 100000000.")
+        for name, value, (_, low, high) in (
+            ("NEXTCLOUD_MAX_FILE_BYTES", self.max_file_bytes, MAX_FILE_BYTES),
+            ("NEXTCLOUD_SEARCH_MAX_DEPTH", self.search_max_depth, SEARCH_MAX_DEPTH),
+            ("NEXTCLOUD_SEARCH_MAX_DIRECTORIES", self.search_max_directories, SEARCH_MAX_DIRECTORIES),
+            ("NEXTCLOUD_SEARCH_MAX_RESULTS", self.search_max_results, SEARCH_MAX_RESULTS),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+                raise ConfigurationError(f"{name} must be between {low} and {high}.")
         if not (1 <= self.timeout_seconds <= 120):
             raise ConfigurationError("NEXTCLOUD_TIMEOUT_SECONDS must be between 1 and 120.")
         allowed = self._rules(self.allowed_paths, "NEXTCLOUD_ALLOWED_PATHS")
@@ -93,8 +112,8 @@ class Settings:
     def from_env(cls) -> Settings:
         """Read settings from the process environment (after optionally loading a .env file)."""
 
-        def number(name: str, default: str, kind: type) -> int | float:
-            raw = os.getenv(name, default).strip()
+        def number(name: str, default: object, kind: type) -> int | float:
+            raw = os.getenv(name, str(default)).strip()
             try:
                 return kind(raw)
             except ValueError:
@@ -109,8 +128,11 @@ class Settings:
             app_password=os.getenv("NEXTCLOUD_APP_PASSWORD", ""),
             allowed_paths=_split(raw_allowed),
             denied_paths=_split(raw_denied),
-            max_file_bytes=int(number("NEXTCLOUD_MAX_FILE_BYTES", "25000000", int)),
+            max_file_bytes=int(number("NEXTCLOUD_MAX_FILE_BYTES", MAX_FILE_BYTES[0], int)),
             timeout_seconds=float(number("NEXTCLOUD_TIMEOUT_SECONDS", "20", float)),
+            search_max_depth=int(number("NEXTCLOUD_SEARCH_MAX_DEPTH", SEARCH_MAX_DEPTH[0], int)),
+            search_max_directories=int(number("NEXTCLOUD_SEARCH_MAX_DIRECTORIES", SEARCH_MAX_DIRECTORIES[0], int)),
+            search_max_results=int(number("NEXTCLOUD_SEARCH_MAX_RESULTS", SEARCH_MAX_RESULTS[0], int)),
         )
 
 

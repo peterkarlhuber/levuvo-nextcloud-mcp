@@ -12,7 +12,7 @@ Read-only MCP server (Model Context Protocol) for Levuvo's Hetzner Storage Share
 
 ## Overview and status
 
-- **Version:** 0.5.2 (Python 3.11+, MIT license).
+- **Version:** 0.5.3 (Python 3.11+, MIT license).
 - **Local (default):** Claude Code starts the server via `stdio` on the Mac. No open port, no hosting.
 - **Remote (optional):** Streamable HTTP on `127.0.0.1` behind a TLS reverse proxy, with a static bearer token or OAuth (external identity provider required).
 - **Read only:** The server sends only `GET` and `PROPFIND` to Nextcloud. There are no tools for writing, deleting, moving or sharing.
@@ -29,7 +29,7 @@ Full reference: [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
 |---|---|---|
 | `list_files` | `path` (empty = all released entries), `limit` 1–250, default 100 | Released entries, or the immediate contents of a released folder (`folder`, `items`, `truncated`) |
 | `get_file_info` | `path` | Metadata without content: type, size, content type, modification date, ETag, Nextcloud permissions |
-| `search_files` | `query` 1–120 characters, `max_depth` 0–6 (default 3), `max_results` 1–100 (default 25) | Matches in the **file or folder name** (no full-text search); since 0.5.1 the name search also matches the explicitly released root folders and files themselves; `complete` shows whether the search was exhaustive |
+| `search_files` | `query` 1–120 characters, optional `path` (a shared folder to search in, default: all shares), `max_depth` 0–`NEXTCLOUD_SEARCH_MAX_DEPTH` (default 3), `max_results` 1–`NEXTCLOUD_SEARCH_MAX_RESULTS` (default 25) | Matches in the **file or folder name** (no full-text search); without `path` the released root folders and files themselves are candidates too; `complete` is true only if the chosen area was searched entirely, otherwise `incomplete_reasons` says why (`depth_limit`, `directory_limit`, `result_limit`) |
 | `read_file` | `path`, `max_chars` 100–30000 (default 16000), since 0.5.2 optional `offset` (default 0), `etag`, `html_visible_text` | One section of the extracted text (`format`, `size_bytes`, `text`, `truncated`, `encoding` for text files; since 0.5.2 `offset`, `returned_chars`, `next_offset`, `has_more`, `total_chars`, `extraction_complete`, `etag`, `sections`). Long documents are read in several calls with `offset=next_offset` |
 
 All four tools carry the MCP annotations `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true` and `openWorldHint=false` (one fixed Nextcloud, closed scope). The annotations only describe the behavior; it is enforced in the code.
@@ -187,6 +187,9 @@ Values come from real environment variables or a `.env` file. Real environment v
 | `NEXTCLOUD_DENIED_PATHS` | no | empty | Exceptions |
 | `NEXTCLOUD_MAX_FILE_BYTES` | no | `25000000` | Download limit for `read_file`, 1–100000000 |
 | `NEXTCLOUD_TIMEOUT_SECONDS` | no | `20` | Timeout for Nextcloud requests, 1–120 |
+| `NEXTCLOUD_SEARCH_MAX_DEPTH` | no | `6` | Highest `max_depth` a `search_files` call may use, 3–20 |
+| `NEXTCLOUD_SEARCH_MAX_DIRECTORIES` | no | `100` | Folders scanned at most per `search_files` call, 1–1000 |
+| `NEXTCLOUD_SEARCH_MAX_RESULTS` | no | `100` | Highest `max_results` a `search_files` call may use, 25–500 |
 | `LEVUVO_MCP_ENV_FILE` | no | – | Explicit path to the `.env` |
 | `MCP_PUBLIC_URL` | HTTP only | `https://mcp.levuvo.com/mcp` | Public HTTPS address, must end in `/mcp`, port 443 only |
 | `MCP_HTTP_PORT` | HTTP only | `8765` | Local port (1024–65535), always `127.0.0.1` only |
@@ -199,6 +202,19 @@ Values come from real environment variables or a `.env` file. Real environment v
 
 The `MCP_*` variables are only read and checked with `--transport http`.
 
+**Limits are server-side caps.** `NEXTCLOUD_MAX_FILE_BYTES` controls the actual download limit of `read_file`. The three `NEXTCLOUD_SEARCH_*` variables (since 0.5.3) cap what a `search_files` call may request; the per-call defaults stay `max_depth=3` and `max_results=25`, and without these variables the limits of 0.5.2 apply (6 levels, 100 folders, 100 results). They only bound the search and never change which paths are released. The tool descriptions and parameter schemas are generated at startup from the loaded values, so the client sees the limits that are actually active (for example `Configured maximum file size: 100000000 bytes.`), and every tool description starts with the running version (`Levuvo Nextcloud MCP v0.5.3 - ...`). **Changes to the `.env` take effect only after the MCP process is restarted** (restart Claude Desktop or reconnect the server in Claude Code); `--check-config` shows the values a new process would load.
+
+Example for a larger structure:
+
+```dotenv
+NEXTCLOUD_MAX_FILE_BYTES=100000000
+NEXTCLOUD_SEARCH_MAX_DEPTH=20
+NEXTCLOUD_SEARCH_MAX_DIRECTORIES=1000
+NEXTCLOUD_SEARCH_MAX_RESULTS=500
+```
+
+A search over 1000 folders sends up to 1000 `PROPFIND` requests (4 in parallel) and can take tens of seconds; see [docs/PERFORMANCE_0.5.2.md](docs/PERFORMANCE_0.5.2.md) before raising `NEXTCLOUD_MAX_FILE_BYTES` on a small server.
+
 ## Check commands
 
 Invoke as `levuvo-nextcloud-mcp` or `python -m levuvo_nextcloud_mcp`:
@@ -207,7 +223,7 @@ Invoke as `levuvo-nextcloud-mcp` or `python -m levuvo_nextcloud_mcp`:
 |---|---|
 | `--transport stdio` | Default; for local clients such as Claude Code |
 | `--transport http` | Streamable HTTP on `127.0.0.1:MCP_HTTP_PORT` |
-| `--check-config` | Checks the configuration offline and prints a summary without password/token. With `--transport http`, the remote settings are checked as well. |
+| `--check-config` | Checks the configuration offline and prints a summary without password/token, including the effective limits (`max_file_bytes`, `max_file_bytes_default` and `search` with `max_depth`, `max_directories`, `max_results`, `concurrency`). With `--transport http`, the remote settings are checked as well. |
 | `--check-nextcloud` | Reads each released entry via `PROPFIND` only (never writes), shows its type and Nextcloud permission letters, and distinguishes rights on a share's mount point from rights on its content (`nc:is-mount-root`, `ocs:share-permissions`, immediate children). Prints a WARNING for real write, delete or create rights on content, and a NOTE "not conclusively verified" when points remain open. Exit code 1 on errors. Details: [SECURITY.md](SECURITY.md#permissions-on-the-mount-point-and-on-content). |
 | `--version` | Print the version |
 
@@ -224,7 +240,7 @@ uv run --extra dev ruff format --check .
 
 The GitHub Actions pipeline `.github/workflows/ci.yml` checks `uv lock --check`, `ruff check` and `ruff format --check` and runs `pytest` on Python 3.11, 3.12 and 3.13 (Ubuntu) and 3.12 on macOS. Another job installs from `requirements-dev.lock` with `--require-hashes` (the documented pip route). Note: `uv run` without `--extra dev` removes the development tools from `.venv` again.
 
-**Local test run for 0.5.2 (2026-11-06, Python 3.13, maintainer environment):** 478 tests passed, 0 failed; line/branch coverage 92 %. `ruff check`, `ruff format --check` and `uv lock --check` without findings. CI results for 3.11–3.13, macOS and the lockfile install are shown on the pull request.
+**Local test run for 0.5.3 (2026-11-06, Python 3.13, maintainer environment):** 556 tests passed, 0 failed; line/branch coverage 92 %. `ruff check`, `ruff format --check` and `uv lock --check` without findings. CI results for 3.11–3.13, macOS and the lockfile install are shown on the pull request.
 
 The automated tests run offline against simulated WebDAV responses. Tests against the real Storage Share with the real client have so far only been reported by the user (see [Overview and status](#overview-and-status) and [Compatibility](#compatibility)).
 

@@ -122,7 +122,9 @@ ADDED_PARAMETERS = {
         "offset": {"type": "integer", "default": 0, "minimum": 0, "maximum": 25_000_000},
         "etag": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": 200}, {"type": "null"}], "default": None},
         "html_visible_text": {"type": "boolean", "default": False},
-    }
+    },
+    # 0.5.3
+    "search_files": {"path": {"type": "string", "default": "", "maxLength": 1024}},
 }
 
 
@@ -227,12 +229,18 @@ async def test_descriptions_state_the_key_facts(tools) -> None:
         "case-insensitive substring",
         "no full-text search",
         "root folders and files themselves",
-        "0.5.1",
         "max_depth",
         "max_results",
         "complete",
         "directories_scanned",
         "100 folders",
+        "incomplete_reasons",
+        "depth_limit",
+        "directory_limit",
+        "result_limit",
+        "Configured maximum depth: 6.",
+        "Configured maximum directories per search: 100.",
+        "Configured maximum results: 100.",
     ):
         assert needle in search, needle
 
@@ -257,7 +265,8 @@ async def test_descriptions_state_the_key_facts(tools) -> None:
         "200 sheets and 200 columns",
         "formulas are not evaluated",
         "NEXTCLOUD_MAX_FILE_BYTES",
-        "25000000 bytes",
+        "Configured maximum file size: 25000000 bytes.",
+        "Default maximum file size: 25000000 bytes",
         "100000000",
         "max_chars",
         "truncated",
@@ -267,8 +276,9 @@ async def test_descriptions_state_the_key_facts(tools) -> None:
 
     for tool in tools.values():
         assert "Read-only" in tool.description
-        if tool.name != "search_files":  # takes no path argument
-            assert ACCESS_DENIED in tool.description
+        assert ACCESS_DENIED in tool.description
+        # Historical fix notes belong in the CHANGELOG, not in the live interface description.
+        assert not re.search(r"(?:fixed|bug|since) (?:in )?0\.\d", tool.description), tool.name
 
 
 def test_described_limits_match_the_code() -> None:
@@ -278,7 +288,7 @@ def test_described_limits_match_the_code() -> None:
     assert extractors.MAX_PDF_PAGES == 5000
     assert (extractors.MAX_SHEETS, extractors.MAX_SHEET_COLUMNS) == (200, 200)
     assert extractors.MAX_EXTRACTED_CHARS == 25_000_000 and extractors.EXTRACTION_TIME_LIMIT == 90
-    assert webdav.MAX_SEARCH_DIRECTORIES == 100
+    assert webdav.SEARCH_CONCURRENCY == 4
     assert webdav.MAX_DIRECTORY_ITEMS == 2000
     assert Settings.__dataclass_fields__["max_file_bytes"].default == 25_000_000
 

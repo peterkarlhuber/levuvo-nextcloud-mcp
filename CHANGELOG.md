@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.3 – 2026-11-06
+
+Feature release: configurable search limits, search in a subfolder, explicit incompleteness reasons, and the running version and active limits in the tool descriptions. Same four tools, same server name and tool IDs, same read-only model (`GET`/`PROPFIND` only), same access rules. New parameters, result fields and environment variables are optional or additive. No new dependencies.
+
+### Added
+
+- **Configurable search limits:** `NEXTCLOUD_SEARCH_MAX_DEPTH` (default 6, 3–20), `NEXTCLOUD_SEARCH_MAX_DIRECTORIES` (default 100, 1–1000) and `NEXTCLOUD_SEARCH_MAX_RESULTS` (default 100, 25–500). They are server-side caps; the per-call defaults stay `max_depth=3` and `max_results=25`. Without the variables, the limits of 0.5.2 apply. The caps are the schema maximums of `max_depth`/`max_results` and are enforced by the server. Invalid values stop the server with `Configuration error: NEXTCLOUD_SEARCH_... must be between ... and ....` or `... must be a number ...`. They never affect which paths are released.
+- **`search_files` parameter `path`** (default `""`): search only inside one shared folder (or a folder below a share). The path is checked by the central access policy; a path that is not shared or is excluded fails with `The path is not released for the MCP agent.`, a file fails with `path must be a folder; this is a file. Use get_file_info or read_file.`
+- **`search_files` result fields** `path` (the searched folder, `""` for all shares) and `incomplete_reasons` (`depth_limit`, `directory_limit`, `result_limit`; only those that actually applied).
+- **Version and active limits in the MCP descriptions:** every tool description starts with `Levuvo Nextcloud MCP v0.5.3 - <title>.` and the server instructions start with `Levuvo Nextcloud MCP v0.5.3.`; the version is derived from `__version__` only. `read_file` states `Configured maximum file size: N bytes.` and the default, `search_files` states the configured maximum depth, directories per search and results. Descriptions and schemas are generated at startup from the validated settings; changes to `.env` require a restart of the MCP process.
+- `--check-config` prints `max_file_bytes_default` and a `search` block (`max_depth`, `max_directories`, `max_results`, `concurrency`).
+
+### Changed
+
+- **`complete` of `search_files` is now exact.** It is `true` only if the chosen area was searched completely. Subfolders deeper than `max_depth` now set `complete=false` with `depth_limit` (0.5.2 skipped them and still reported `complete=true`). A search that returns exactly `max_results` hits after scanning everything is now `complete=true` (0.5.2 reported `false`).
+- Historical notes such as "fixed in 0.5.1" were removed from the tool descriptions; they belong in this changelog.
+- Tool descriptions use a plain ASCII hyphen after the version (`v0.5.3 - Read file.`) because all descriptions are kept ASCII.
+
+### Security
+
+- No change to authentication, HTTPS, the allowlist/denylist or the read-only model. The new variables only bound the work of a search.
+- The queue of folders waiting to be scanned is bounded by the folder budget, so a wide tree cannot grow memory without limit. Search concurrency stays at 4 requests; the WebDAV response limits (2 MB, 2000 entries per folder) are unchanged.
+- A search with the maximum budget of 1000 folders sends up to 1000 `PROPFIND` requests and can take tens of seconds.
+- Tool descriptions contain only the version and numeric limits, never URLs, user names, passwords or tokens.
+
 ## 0.5.2 – 2026-11-06
 
 Feature release: RTF support and large-file support with sectioned reading. Same four tools and the same read-only model (`GET`/`PROPFIND` only); existing parameters and result fields are unchanged, new ones are optional or additive. No new dependencies; lockfiles unchanged.
