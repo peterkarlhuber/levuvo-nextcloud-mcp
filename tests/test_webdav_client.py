@@ -390,7 +390,10 @@ async def test_single_http_client_and_type_cache_reduce_requests(make_settings, 
     assert len(created) == 1
     root_checks = [r for r in nextcloud.requests if r == ("PROPFIND", "05_Projekte/Offen")]
     assert len(root_checks) == 1  # the untyped root is verified once, then cached
-    assert nextcloud.requests.count(("GET", "05_Projekte/Offen/Plan.md")) == 3
+    # 0.5.2: the extracted text is cached by ETag, so the file is downloaded once; each call still
+    # re-checks the ETag with one PROPFIND.
+    assert nextcloud.requests.count(("GET", "05_Projekte/Offen/Plan.md")) == 1
+    assert nextcloud.requests.count(("PROPFIND", "05_Projekte/Offen/Plan.md")) == 3
 
 
 async def test_concurrent_reads_are_consistent(make_settings) -> None:
@@ -403,11 +406,11 @@ async def test_concurrent_reads_are_consistent(make_settings) -> None:
 async def test_extraction_does_not_block_event_loop(make_settings, monkeypatch) -> None:
     fake = FakeNextcloud(files={"A/slow.md": b"x"})
 
-    def slow_extract(path, data, *, max_chars):
+    def slow_extract(path, source, **kwargs):
         time.sleep(0.3)
-        return "x", False, ".md", "utf-8"
+        return webdav_module.Extraction(text="x", format=".md", encoding="utf-8")
 
-    monkeypatch.setattr(webdav_module, "extract_text", slow_extract)
+    monkeypatch.setattr(webdav_module, "extract_document", slow_extract)
     ticks = 0
 
     async def ticker() -> None:

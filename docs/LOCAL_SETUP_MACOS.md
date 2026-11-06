@@ -176,6 +176,8 @@ Expected results:
 | 4 | "Agent" finds the folder `00_Agent Test` (since 0.5.1); "test.txt" finds the file |
 | 5 | Error "The path is not released for the MCP agent." |
 
+Optional long-document test (since 0.5.2): put a long PDF or text file into `00_Agent Test` and ask: "Read the whole file with read_file and keep calling it with offset=next_offset and the returned etag until has_more is false. Report total_chars, the number of calls and extraction_complete." The sections together should cover the whole file; `extraction_complete: false` explains in `extraction_notes` what could not be read.
+
 Step 5 is the negative test: `02_Finanzen` is not released and is rejected **before** any request is sent to Nextcloud – even if `agent.levuvo` could see the folder in Nextcloud.
 
 ## Troubleshooting

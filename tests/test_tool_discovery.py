@@ -116,10 +116,27 @@ async def test_exactly_four_tools_with_unchanged_ids(tools) -> None:
     assert set(tools) == {"list_files", "get_file_info", "search_files", "read_file"}
 
 
+# Optional parameters added later (0.5.2). Existing parameters must keep their schema exactly.
+ADDED_PARAMETERS = {
+    "read_file": {
+        "offset": {"type": "integer", "default": 0, "minimum": 0, "maximum": 25_000_000},
+        "etag": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": 200}, {"type": "null"}], "default": None},
+        "html_visible_text": {"type": "boolean", "default": False},
+    }
+}
+
+
 @pytest.mark.asyncio
 async def test_input_schemas_are_compatible_with_0_5_0(tools) -> None:
     for name, expected in SCHEMA_SNAPSHOT_0_5_0.items():
-        assert strip_texts(tools[name].input_schema) == expected, name
+        actual = strip_texts(tools[name].input_schema)
+        added = ADDED_PARAMETERS.get(name, {})
+        assert actual.get("required") == expected.get("required"), name
+        assert {k: v for k, v in actual["properties"].items() if k not in added} == expected["properties"], name
+        assert {k: v for k, v in actual["properties"].items() if k in added} == added, name
+        assert {k: v for k, v in actual.items() if k != "properties"} == {
+            k: v for k, v in expected.items() if k != "properties"
+        }, name
 
 
 @pytest.mark.asyncio
@@ -227,14 +244,21 @@ async def test_descriptions_state_the_key_facts(tools) -> None:
         ".rtf",
         "embedded objects",
         ".txt",
-        "40 pages",
+        "5000",
+        "[Page N]",
+        "has_more",
+        "next_offset",
+        "extraction_complete",
+        "etag",
+        "html_visible_text",
         "no OCR",
         "encrypted",
         "main body",
-        "10 sheets, 1000 rows and 60 columns",
+        "200 sheets and 200 columns",
         "formulas are not evaluated",
         "NEXTCLOUD_MAX_FILE_BYTES",
-        "8000000 bytes",
+        "25000000 bytes",
+        "100000000",
         "max_chars",
         "truncated",
         "untrusted",
@@ -251,11 +275,12 @@ def test_described_limits_match_the_code() -> None:
     from levuvo_nextcloud_mcp import extractors, webdav
     from levuvo_nextcloud_mcp.settings import Settings
 
-    assert extractors.MAX_PDF_PAGES == 40
-    assert (extractors.MAX_SHEETS, extractors.MAX_SHEET_ROWS, extractors.MAX_SHEET_COLUMNS) == (10, 1000, 60)
+    assert extractors.MAX_PDF_PAGES == 5000
+    assert (extractors.MAX_SHEETS, extractors.MAX_SHEET_COLUMNS) == (200, 200)
+    assert extractors.MAX_EXTRACTED_CHARS == 25_000_000 and extractors.EXTRACTION_TIME_LIMIT == 90
     assert webdav.MAX_SEARCH_DIRECTORIES == 100
     assert webdav.MAX_DIRECTORY_ITEMS == 2000
-    assert Settings.__dataclass_fields__["max_file_bytes"].default == 8_000_000
+    assert Settings.__dataclass_fields__["max_file_bytes"].default == 25_000_000
 
 
 @pytest.mark.asyncio

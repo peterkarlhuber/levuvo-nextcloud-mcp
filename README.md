@@ -30,7 +30,7 @@ Full reference: [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
 | `list_files` | `path` (empty = all released entries), `limit` 1–250, default 100 | Released entries, or the immediate contents of a released folder (`folder`, `items`, `truncated`) |
 | `get_file_info` | `path` | Metadata without content: type, size, content type, modification date, ETag, Nextcloud permissions |
 | `search_files` | `query` 1–120 characters, `max_depth` 0–6 (default 3), `max_results` 1–100 (default 25) | Matches in the **file or folder name** (no full-text search); since 0.5.1 the name search also matches the explicitly released root folders and files themselves; `complete` shows whether the search was exhaustive |
-| `read_file` | `path`, `max_chars` 100–30000 (default 16000) | Text of the file (`format`, `size_bytes`, `text`, `truncated`, plus `encoding` for text files) |
+| `read_file` | `path`, `max_chars` 100–30000 (default 16000), since 0.5.2 optional `offset` (default 0), `etag`, `html_visible_text` | One section of the extracted text (`format`, `size_bytes`, `text`, `truncated`, `encoding` for text files; since 0.5.2 `offset`, `returned_chars`, `next_offset`, `has_more`, `total_chars`, `extraction_complete`, `etag`, `sections`). Long documents are read in several calls with `offset=next_offset` |
 
 All four tools carry the MCP annotations `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true` and `openWorldHint=false` (one fixed Nextcloud, closed scope). The annotations only describe the behavior; it is enforced in the code.
 
@@ -39,12 +39,14 @@ Expected errors (path not released, file too large, Nextcloud unreachable …) a
 **Formats supported by `read_file`:** text formats (`.txt .md .markdown .csv .tsv .json .jsonl .yaml .yml .xml .html .htm .log .toml .ini .cfg .py .js .ts .css .sql .rst`), `.pdf`, `.docx`, `.xlsx`, `.rtf`.
 
 - Text: UTF-8 (with or without BOM), UTF-16 with BOM, otherwise Windows-1252 (`encoding: "cp1252"`, typical for Excel CSV). Binary content is rejected.
-- PDF: at most 40 pages, no OCR; scanned PDFs produce a note. Encrypted PDFs are rejected.
+- PDF: up to 5000 pages with `[Page N]` markers, no OCR; scanned PDFs produce a note. Encrypted PDFs are rejected.
 - DOCX: paragraphs and tables of the main body in document order (no headers/footers, text boxes, comments).
-- XLSX: at most 10 sheets, 1000 rows, 60 columns; stored values only, formulas are not evaluated.
+- XLSX: up to 200 sheets and 200 columns, all rows (`[Sheet: name]` markers, rows as `12: a | b` with the Excel row number); stored values only, formulas are not evaluated.
+- HTML: raw source by default; `html_visible_text=true` returns only the visible text (scripts, styles and markup removed).
 - RTF (since 0.5.2): paragraphs, table rows (cells separated by ` | `), umlauts and Unicode; formatting is removed. Embedded objects, pictures, headers, footers and footnotes are skipped, never executed. Damaged RTF files produce a clear error message.
 - Office files are checked for zip bombs before extraction; damaged documents produce a clear error message.
-- Download limit: `NEXTCLOUD_MAX_FILE_BYTES` (default 8 MB).
+- Download limit: `NEXTCLOUD_MAX_FILE_BYTES` (default 25 MB, configurable up to 100 MB), streamed into a temporary file that is deleted after extraction.
+- Long documents (since 0.5.2): each call returns at most `max_chars` characters; `has_more`/`next_offset` tell the agent how to continue. Up to 25,000,000 extracted characters per file (90 s extraction time); beyond that `extraction_complete` is `false` and `extraction_notes` explains why. See [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md#reading-long-documents-in-sections) and the measurements in [docs/PERFORMANCE_0.5.2.md](docs/PERFORMANCE_0.5.2.md).
 
 ## Quick start: macOS with Claude Code
 
@@ -183,7 +185,7 @@ Values come from real environment variables or a `.env` file. Real environment v
 | `NEXTCLOUD_USER_ID` | no | = login name | WebDAV user ID, if it differs from the login name (e.g. login by email address) |
 | `NEXTCLOUD_ALLOWED_PATHS` | yes | – | Released entries, see [Permissions](#permissions) |
 | `NEXTCLOUD_DENIED_PATHS` | no | empty | Exceptions |
-| `NEXTCLOUD_MAX_FILE_BYTES` | no | `8000000` | Download limit for `read_file`, 1–30000000 |
+| `NEXTCLOUD_MAX_FILE_BYTES` | no | `25000000` | Download limit for `read_file`, 1–100000000 |
 | `NEXTCLOUD_TIMEOUT_SECONDS` | no | `20` | Timeout for Nextcloud requests, 1–120 |
 | `LEVUVO_MCP_ENV_FILE` | no | – | Explicit path to the `.env` |
 | `MCP_PUBLIC_URL` | HTTP only | `https://mcp.levuvo.com/mcp` | Public HTTPS address, must end in `/mcp`, port 443 only |

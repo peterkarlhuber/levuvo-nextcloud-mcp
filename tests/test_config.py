@@ -58,7 +58,7 @@ def test_user_id_overrides_webdav_user(clean_env: pytest.MonkeyPatch) -> None:
         ({"NEXTCLOUD_URL": ""}, "NEXTCLOUD_URL"),
         ({"NEXTCLOUD_MAX_FILE_BYTES": "lots"}, "must be a number"),
         ({"NEXTCLOUD_MAX_FILE_BYTES": "0"}, "between"),
-        ({"NEXTCLOUD_MAX_FILE_BYTES": "40000000"}, "between"),
+        ({"NEXTCLOUD_MAX_FILE_BYTES": "100000001"}, "between"),
         ({"NEXTCLOUD_TIMEOUT_SECONDS": "500"}, "between"),
         ({"NEXTCLOUD_DENIED_PATHS": "DIR:01_Unternehmen/Privat"}, "unknown prefix"),
         ({"NEXTCLOUD_DENIED_PATHS": "02_Finanzen"}, "does not lie below any share"),

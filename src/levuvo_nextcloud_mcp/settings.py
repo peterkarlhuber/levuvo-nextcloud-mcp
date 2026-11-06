@@ -40,7 +40,7 @@ class Settings:
     allowed_paths: tuple[str, ...]
     denied_paths: tuple[str, ...] = ()
     user_id: str = ""
-    max_file_bytes: int = 8_000_000
+    max_file_bytes: int = 25_000_000
     timeout_seconds: float = 20.0
     policy: AccessPolicy = field(init=False, repr=False, compare=False)
 
@@ -66,8 +66,8 @@ class Settings:
             raise ConfigurationError("NEXTCLOUD_USERNAME is missing.")
         if not self.app_password or _is_placeholder(self.app_password):
             raise ConfigurationError("NEXTCLOUD_APP_PASSWORD is missing or still contains a placeholder.")
-        if not (1 <= self.max_file_bytes <= 30_000_000):
-            raise ConfigurationError("NEXTCLOUD_MAX_FILE_BYTES must be between 1 and 30000000.")
+        if not (1 <= self.max_file_bytes <= 100_000_000):
+            raise ConfigurationError("NEXTCLOUD_MAX_FILE_BYTES must be between 1 and 100000000.")
         if not (1 <= self.timeout_seconds <= 120):
             raise ConfigurationError("NEXTCLOUD_TIMEOUT_SECONDS must be between 1 and 120.")
         allowed = self._rules(self.allowed_paths, "NEXTCLOUD_ALLOWED_PATHS")
@@ -109,7 +109,7 @@ class Settings:
             app_password=os.getenv("NEXTCLOUD_APP_PASSWORD", ""),
             allowed_paths=_split(raw_allowed),
             denied_paths=_split(raw_denied),
-            max_file_bytes=int(number("NEXTCLOUD_MAX_FILE_BYTES", "8000000", int)),
+            max_file_bytes=int(number("NEXTCLOUD_MAX_FILE_BYTES", "25000000", int)),
             timeout_seconds=float(number("NEXTCLOUD_TIMEOUT_SECONDS", "20", float)),
         )
 
