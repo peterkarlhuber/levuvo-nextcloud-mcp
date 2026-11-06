@@ -49,7 +49,7 @@ The 100 MB download limit was confirmed as configuration only; no file of that s
 
 Calls per tool: `list_files` 3, `get_file_info` 5, `search_files` 10, `read_file` 6. Expected access denials and parameter errors are positive results of the respective checks, not failures.
 
-Note on the call count: the calls described individually below add up to 23 (run 1: 12). The reported totals of 13 calls in run 1 and 10 `search_files` calls include one further `search_files` call in run 1 that is not described individually in the user's report. The totals are documented as reported.
+Note on the call count: the calls described individually below add up to 23 (run 1: 12). The reported totals of 13 calls in run 1 and 10 `search_files` calls include one further `search_files` call in run 1 that is not described in the user's report. A later review suggested that this was `search_files(query=".rtf", max_depth=5)`, a search for RTF test data that would fit check 8b being NOT TESTED in run 1. This call, its result and its purpose do not appear in the available report, so the identification is **unconfirmed**; the totals are documented as reported.
 
 ### Checks
 
@@ -122,9 +122,15 @@ For 0.5.3 ([PR #4](https://github.com/peterkarlhuber/levuvo-nextcloud-mcp/pull/4
 
 ### Observations and findings
 
-**1. Temporary "File or folder not found." without a path.** Around 17:37 on 2026-11-06, `list_files()` and `search_files()` without `path` returned `File or folder not found.`; around 17:39 the same calls worked again. The cause was not determined; a configured share may have been temporarily unreachable or renamed while the test structure was being prepared. This was not reproduced under controlled conditions.
+**1. Temporary "File or folder not found." without a path.**
 
-*Code finding (independent of that cause):* without a path, `list_files` and `search_files` request the metadata of every configured share one after another and do not catch errors per share. If one configured share is missing (Nextcloud answers 404), the **whole** call fails with `File or folder not found.`, even if other shares exist. Reproduced by the maintainers with the simulated WebDAV server and two configured shares, one of them missing. Failing loudly avoids silently incomplete results, but it does not say which share is missing. Recommendation for a later version: name the missing share in the error, or return the reachable shares together with an explicit per-share error and `complete=false`; do not suppress the error silently. `--check-nextcloud` already reports each share separately and is the right tool to diagnose this today.
+*Observation (user-reported):* around 17:37 on 2026-11-06, `list_files()` and `search_files()` without `path` returned `File or folder not found.`; around 17:39 the same calls worked again.
+
+*Confirmed code behaviour (checked by the maintainers):* without a path, both tools first request the metadata of every entry of `NEXTCLOUD_ALLOWED_PATHS` (`PROPFIND`, one after another) and do not catch errors per entry. `File or folder not found.` is the message for an HTTP 404 from Nextcloud. So if any configured entry answers 404, the **whole** call fails with this message, without naming the entry, even if other entries exist. Reproduced with the simulated WebDAV server and two configured shares, one of them missing. In the live configuration `list_files()` returned exactly one entry (`00_Agent Test`), so the 404 must have been returned for that share itself.
+
+*Cause of the live error: unknown.* A configured share that was missing at that moment (for example renamed, moved or unshared while the test structure was being prepared) is one possible cause that is consistent with the code, but it was not proven; a transient 404 from Nextcloud itself cannot be ruled out. The error was not reproduced under controlled conditions, and no server log of that time is available.
+
+*Recommendation for a later version:* name the failing entry in the error, or return the reachable shares with an explicit per-share error and `complete=false`; do not suppress the error silently. Until then, `--check-nextcloud` reports every configured entry separately and shows which one fails.
 
 **2. Validation errors show internal details.** A call outside the schema limits (here `max_depth=21`) is rejected by the MCP SDK's argument validation before the server code runs. The returned message contains the Pydantic error text, the rejected input value, the Pydantic minor version (`2.14`) and a link to `errors.pydantic.dev`. *Code finding:* reproduced by the maintainers; the message comes from the SDK, not from this project's error handling. Low severity: no paths, credentials or Nextcloud data are disclosed, only the library version. Recommendation: map schema validation errors to a short English message such as `max_depth must be between 0 and 20.` in a later version.
 
